@@ -343,6 +343,18 @@ def build_pairs(
     return [pairs[key] for key in sorted(pairs)]
 
 
+def public_setup_content(path: str, data: bytes) -> bytes:
+    """Remove marked local routing only from the shared setup skill."""
+    if path != "skills/velociraptor-engagement-setup/SKILL.md":
+        return data
+    marker = b"<!-- private-setup-routing -->"
+    lines = data.splitlines(keepends=True)
+    for line in lines:
+        if marker in line and not line.rstrip().endswith(marker):
+            raise ValueError("Malformed private setup routing line")
+    return b"".join(line for line in lines if marker not in line)
+
+
 def read_optional(reader: Reader, path: str, mode: str | None) -> FileValue | None:
     if mode is None:
         return None
@@ -361,6 +373,8 @@ def plan_actions(
     actions: list[Action] = []
     for pair, ai_mode, public_mode in pairs:
         ai_value = read_optional(ai_reader, pair.ai_path, ai_mode)
+        if direction == "from-ai" and ai_value is not None:
+            ai_value = FileValue(public_setup_content(pair.ai_path, ai_value.data), ai_value.mode)
         public_value = read_optional(public_reader, pair.public_path, public_mode)
         source = ai_value if direction == "from-ai" else public_value
         target = public_value if direction == "from-ai" else ai_value

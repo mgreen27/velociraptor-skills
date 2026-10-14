@@ -433,3 +433,25 @@ def test_committed_reads_batch_only_managed_blobs(tmp_path: Path, monkeypatch: p
     run(["python3", str(script), "from-ai", "--source", str(ai), "--apply", "--allow-delete"], public)
     assert not (public / "managed/file.txt").exists()
     assert (public / "managed/renamed.txt").read_bytes() == contents["file.txt"]
+
+
+def test_private_setup_routing_is_removed_before_policy_and_baseline(tmp_path):
+    public, ai, script = initialize_pair(tmp_path)
+    rel = "skills/velociraptor-engagement-setup/SKILL.md"
+    (public / "config/sync-manifest.tsv").write_text(f"{rel}\t{rel}\tfile\n")
+    source = ai / rel
+    source.parent.mkdir(parents=True)
+    private = "DO-NOT-EXPORT local routing <!-- private-setup-routing -->\n"
+    source.write_text("# Setup\n" + private + "Shared instructions\n")
+    commit_all(ai, "private routing")
+    commit_all(public, "setup mapping")
+    run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public)
+    assert (public / rel).read_text() == "# Setup\nShared instructions\n"
+    assert private in source.read_text()
+    result = run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public)
+    assert "unchanged=1" in result.stdout
+    # A reverse update cannot silently discard the local routing.
+    (public / rel).write_text("# Setup\nChanged public instructions\n")
+    result = run(["python3", str(script), "to-ai", "--target", str(ai), "--working-tree", "--check"], public, expected=1)
+    assert "conflict" in result.stdout
+    assert private in source.read_text()

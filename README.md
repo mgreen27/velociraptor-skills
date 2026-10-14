@@ -252,6 +252,12 @@ without a baseline, differing files present on both sides are treated as
 conflicts and require manual review. Public-export validation does not require
 the baseline, but checks it when present.
 
+The shared setup skill may contain single-line local routing ending in
+`<!-- private-setup-routing -->`. Imports strip those lines before comparison,
+hashing and copying; all other content retains normal conflict and policy checks.
+Review reverse-sync conflicts to preserve private routing. Run public-export
+validation after importing; never copy the private setup adapter into this repository.
+
 Preview and import a committed revision from a sibling `ai_skills` checkout:
 
 ```sh
