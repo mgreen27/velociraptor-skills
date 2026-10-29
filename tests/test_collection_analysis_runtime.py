@@ -763,14 +763,6 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
             )
             for index, result in enumerate(artifact_results)
         }
-        host_expected = [
-            {
-                "chunk_index": index,
-                "chunk_count": len(artifact_results),
-                "row_count": 2,
-            }
-            for index in range(len(artifact_results))
-        ]
         single_prompt = collection_analysis_runtime.render_synthesis_prompt(
             task="host-analysis",
             question="What is security relevant?",
@@ -1030,14 +1022,6 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
         ]
         plan, chunks = self.build(artifact_count=1, rows=rows, limit=150)
         self.assertGreater(plan["chunk_count"], 1)
-        expected = [
-            {
-                **chunk,
-                "chunk_index": int(chunk["task_chunk_index"]),
-                "chunk_count": int(chunk["task_chunk_count"]),
-            }
-            for chunk in plan["chunks"]
-        ]
         compact_workers = {}
         for chunk in plan["chunks"]:
             source = next(

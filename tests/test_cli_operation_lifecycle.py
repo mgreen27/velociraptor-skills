@@ -152,6 +152,19 @@ def test_initialization_logs_without_precreating_the_case(monkeypatch, tmp_path,
     assert json.loads(capsys.readouterr().out)["status"] == "reused"
 
 
+@pytest.mark.parametrize("args", [
+    ["query", "--id", "lab7", "--vql", "SELECT 1 FROM scope()"],
+    ["clients", "list", "--id", "lab7"],
+])
+def test_instance_only_id_alias_does_not_create_a_case(monkeypatch, tmp_path, args):
+    from vraptor import query
+
+    monkeypatch.setattr(query, "main", lambda argv: 0)
+    assert cli.main(args) == 0
+    assert not (tmp_path / "cases").exists()
+    assert_lifecycle(tmp_path / "state/vraptor/logs/token-usage.jsonl", attempts=0, tokens=0)
+
+
 def test_initialization_keeps_configuration_error_category(monkeypatch, tmp_path):
     from vraptor import workspace
 

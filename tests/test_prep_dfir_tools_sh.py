@@ -168,6 +168,53 @@ class PrepDfirToolsShellTest(unittest.TestCase):
         )
         self.assertFalse(python3_stub_log.exists())
 
+    def test_venv_installs_only_checkout_requirements_from_the_checkout(self):
+        repo_root, script_path = self.make_temp_repo()
+        fake_bin = self.make_fake_bin(repo_root)
+        self.write_stub_python3(fake_bin)
+        os.symlink(shutil.which("grep"), fake_bin / "grep")
+        log = repo_root / "venv-python.log"
+        venv_python = repo_root / ".venv/bin/python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$*" >> "$VENV_PYTHON_LOG"\n')
+        venv_python.chmod(0o755)
+        # A requirements file beside the packaged script is never a fallback:
+        # resolving it from a public index would install an unclaimed name.
+        (script_path.parent / "requirements.txt").write_text("vraptor[ai]==0.1.0\n")
+        env = {
+            "PATH": str(fake_bin),
+            "VENV_PYTHON_LOG": str(log),
+            "PYTHON3_STUB_LOG": str(repo_root / "python3-stub.log"),
+        }
+
+        result = self.run_script(script_path, "-t", "venv", env_overrides=env)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            [line.split("|", 1)[1] for line in log.read_text(encoding="utf-8").splitlines()],
+            ["-m pip install --upgrade pip setuptools wheel"],
+        )
+
+        # A checkout's requirements install from the checkout so relative
+        # editable paths resolve.
+        requirements = repo_root / "requirements.txt"
+        requirements.write_text("-e ./packages/vraptor\n")
+        log.unlink()
+        work_dir = repo_root / "elsewhere"
+        work_dir.mkdir()
+        result = subprocess.run(
+            [BASH, str(script_path), "-t", "venv"], text=True, capture_output=True,
+            check=False, cwd=work_dir,
+            env={**os.environ, **env, "AI_SKILLS_REPO_ROOT": str(repo_root),
+                 "HOME": str(repo_root.parent / "home")},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            f"{repo_root}|-m pip install -r {requirements}",
+            log.read_text(encoding="utf-8").splitlines(),
+        )
+
     def write_stub_curl(self, fake_bin):
         curl = fake_bin / "curl"
         curl.write_text('''#!/bin/sh

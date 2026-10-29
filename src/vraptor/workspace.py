@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 from itertools import chain
 from pathlib import Path
 
@@ -76,8 +77,8 @@ def initialize(investigation_id: str, case_root: Path, investigation_dir: str | 
         content = (
             template.read_text(encoding="utf-8")
             .replace("{{investigation_id}}", identity)
-            .replace("{{investigation_id_arg}}", repr(identity))
-            .replace("{{case_root_arg}}", repr(str(directory.parent)))
+            .replace("{{investigation_id_arg}}", shlex.quote(identity))
+            .replace("{{case_root_arg}}", shlex.quote(str(directory.parent)))
         )
         try:
             with guidance.open("x", encoding="utf-8") as output:

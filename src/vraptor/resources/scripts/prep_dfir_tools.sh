@@ -27,10 +27,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AI_SKILLS_REPO_ROOT:-$PWD}"
 ENV_HELPER="${SCRIPT_DIR}/load_repo_env.sh"
 VENV_DIR="${REPO_ROOT}/.venv"
+# Only a checkout's own requirements are installed; standalone installs already
+# have vraptor, so there is no packaged fallback to resolve from a public index.
 REQUIREMENTS_FILE="${REPO_ROOT}/requirements.txt"
-if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
-    REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
-fi
 VENV_PYTHON="${VENV_DIR}/bin/python"
 VENV_LOG2TIMELINE="${VENV_DIR}/bin/log2timeline"
 VELOCIRAPTOR_INIT_SECONDS=10

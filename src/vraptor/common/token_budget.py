@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 import tiktoken
 
@@ -20,9 +21,38 @@ def token_encoding_name() -> str:
     return os.getenv("AI_SKILLS_TOKEN_ENCODING", DEFAULT_ENCODING_NAME).strip() or DEFAULT_ENCODING_NAME
 
 
+def token_cache_dir() -> Path:
+    """Persistent tokenizer cache; tiktoken's default lives in the temp dir."""
+    configured = os.environ.get("XDG_CACHE_HOME", "")
+    root = Path(configured).expanduser() if configured else Path.home() / ".cache"
+    if not root.is_absolute():
+        root = Path.home() / ".cache"
+    return root / "vraptor" / "tiktoken"
+
+
+def _use_persistent_cache() -> None:
+    if "TIKTOKEN_CACHE_DIR" in os.environ or "DATA_GYM_CACHE_DIR" in os.environ:
+        return
+    directory = token_cache_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    if os.access(directory, os.W_OK):
+        os.environ["TIKTOKEN_CACHE_DIR"] = str(directory)
+
+
 @lru_cache(maxsize=8)
 def encoder_for_name(name: str):
-    return tiktoken.get_encoding(name)
+    _use_persistent_cache()
+    try:
+        return tiktoken.get_encoding(name)
+    except OSError as exc:
+        raise TokenBudgetError(
+            f"Token encoding {name} is not cached and could not be downloaded. "
+            "Run `vraptor tools prep` once while online, or copy a populated "
+            f"cache to {os.environ.get('TIKTOKEN_CACHE_DIR') or token_cache_dir()}."
+        ) from exc
 
 
 def token_encoder(encoding_name: str | None = None):

@@ -10,6 +10,7 @@ from vraptor import cli, results
 from vraptor.collect import requests as collection
 from vraptor.analyze import command as analysis
 from vraptor.analyze import existing as existing_analysis
+from vraptor.common import token_budget
 
 
 @pytest.mark.parametrize("args", [
@@ -27,10 +28,14 @@ def test_conflicting_or_mutating_selectors_fail(args):
 
 
 @pytest.mark.parametrize("target", ["venv", "velociraptor", "volatility", "plaso", "tsk", "all"])
-def test_preparation_dispatch_preserves_targets_without_installing(target):
-    with patch.object(cli.subprocess, "run", return_value=Mock(returncode=17)) as run:
+def test_preparation_dispatch_preserves_targets_without_installing(target, capsys):
+    offline = token_budget.TokenBudgetError("encoding unavailable")
+    with patch.object(cli.subprocess, "run", return_value=Mock(returncode=17)) as run, \
+            patch.object(token_budget, "token_encoder", side_effect=offline) as prefetch:
         assert cli.main(["tools", "prep", "-t", target, "-d", "/synthetic/tools"]) == 17
     assert run.call_args.args[0][2:] == ["-t", target, "-d", "/synthetic/tools"]
+    prefetch.assert_called_once_with()
+    assert "encoding unavailable" in capsys.readouterr().err
 
 
 def test_guard_blocks_mutations_through_nested_operations():

@@ -29,8 +29,8 @@ verified Microsoft signer and argument-free launch constraints still apply.
 2. Add, edit, consolidate or remove approved rules in `autoruns-golden.csv`.
    Keep `Category,ImagePath,LaunchString,Signer,Notes,LastModified` in that order.
    Use a CSV writer to preserve quoting and group categories alphabetically.
-   Describe filtering scope in Notes; retain dates on untouched rows and set the
-   current local date on edited rows. New prospects need only the first five fields.
+   Describe filtering scope in Notes; retain dates on untouched rows and set edited
+   rows to the build date. New prospects need only the first five fields.
    The generic System32 Drivers rule accepts a System32 launch path or a bare
    DLL launch string without backslashes. It requires a verified signer, of any
    publisher. ImagePath and LaunchString are matched independently; matching
@@ -71,7 +71,8 @@ verified Microsoft signer and argument-free launch constraints still apply.
 The builder accepts five-column inputs or the six-column canonical CSV. Supplied
 LastModified values are ignored during database generation: new or changed rows
 receive the build date and unchanged identities/Notes retain their database date.
-The CSV dates record source edits; database dates record ingestion. A no-op build
+After a build, the CSV dates must equal the database dates;
+`tests/test_autoruns_csv_db.py` checks the packaged pair. A no-op build
 leaves the database byte-identical. Builds validate regexes, schema and round-trip
 content, back up the previous database by SHA-256, and replace it atomically.
 Neither building nor editing uploads the database or runs a hunt.

@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -407,6 +408,27 @@ class GenericStackReviewTest(unittest.TestCase):
             result["fallback_reason"],
             "invalid_ai_response_after_retry",
         )
+
+    def test_cancelled_recommendation_closes_shared_runner(self):
+        runner = mock.Mock()
+
+        async def cancelled(**_kwargs):
+            raise asyncio.CancelledError
+
+        review = generic_stack_review.autoruns_ai_review
+        with mock.patch.object(
+            review, "_review_runner", return_value=runner
+        ), mock.patch.object(review, "run_agent_text_async", cancelled):
+            with self.assertRaises(asyncio.CancelledError):
+                generic_stack_review.recommend_runtime_stack_fields(
+                    pslist_rows(),
+                    artifact=PSLIST_ARTIFACT,
+                    question="Review processes",
+                    workdir=Path("."),
+                    execution=_test_execution(),
+                )
+
+        runner.close.assert_called_once_with()
 
     def test_unknown_unsafe_and_excess_dimension_recommendations_fail_closed(self):
         statistics = generic_stack_review.calculate_field_statistics(pslist_rows())
