@@ -19,14 +19,14 @@ The standalone `vraptor` CLI uses the same case paths and configuration. Use
 client retries and GoldenDB uploads remain explicit. Legacy `dfir`
 routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
 
-When a calling analyst such as Codex will write the assessment, pass
-`--synthesis none` and review the validated preliminary candidates in the caller.
-Use `--synthesis full` for a standalone harness report. The shared
+Use the default full synthesis for normal analysis, including when Codex is the
+caller. Add `--synthesis none` only when preliminary-only analysis or caller-only
+final review is requested, then review the validated candidates in the caller. The shared
 [synthesis contract](../../docs/reference/analysis-synthesis.md)
 covers candidate/context pagination, saved-summary-only execution and coverage.
 
-The CLI defaults to `--synthesis none`; request `--synthesis full` explicitly
-for harness synthesis. Save caller-reviewed host conclusions as
+The CLI defaults to `--synthesis full`; `--skip-ai` takes precedence and prevents
+all model calls. Save caller-reviewed host conclusions as
 `assessment-host.md` and hunt conclusions as `assessment-hunt.md`, following
 the provenance and freshness requirements in the shared
 [synthesis contract](../../docs/reference/analysis-synthesis.md#caller-assessment-files).

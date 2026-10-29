@@ -173,7 +173,7 @@ For a large artifact, the automated generic stack lane:
    treats all values as untrusted evidence and prohibits embedded instructions.
    Repeated `--stack-field-preference FIELD` values and optional bounded
    `--stack-field-guidance TEXT` are included as advisory operator intent.
-   Strict line-v2 output contains an optional scope field, one to three
+   Validated tab-delimited output contains an optional scope field, one to three
    signature fields, rationales, and explicit rejections, with at most three
    total dimensions. It contains field names only, never VQL.
 5. Deterministically rejects unknown or unsafe names, time and record IDs,
@@ -190,7 +190,7 @@ For a large artifact, the automated generic stack lane:
    and fleet statistics to the aggregate analyst.
 9. Requeries retained high-value groups for exact impacted endpoint identities
    and relevant original rows, then sends the enriched evidence through a
-   second strict line-v2 analyst pass.
+   second validated tab-delimited analyst pass.
 10. Python owns supplied-part and row-count accounting. It validates sparse
    `FLAG` records and requires exactly one `ASSESSMENT` for every follow-up
    GroupId. One invalid result receives one retry, then the run fails closed.
@@ -440,14 +440,15 @@ is available.
 
 ### Aggregate review and report rendering
 
-The hunt synthesis manager consolidates semantically equivalent observations and selects representative rows. Model-facing workers use strict line-v2 records; Python owns task, question, chunk, status, and coverage metadata and rejects model-generated JSON.
+The hunt synthesis manager consolidates semantically equivalent observations and selects representative rows. Model-facing workers use validated tab-delimited records; Python owns task, question, chunk, status, and coverage metadata and rejects model-generated JSON.
 `analysis-hunt.md` groups references under findings,
 includes hostname with client ID when available, and shows bounded examples. When a
 selected row contains materially useful long-form content—commonly EVTXHunter or
 PowerShell—the runtime writes `analysis/finding-evidence.md` with deduplicated full
 projected representative for rows sharing the same hydrated field set. This generic
-mechanism is available to any artifact. Full-row Markdown is capped at 2,000,000
-characters; omitted groups remain authoritative in Velociraptor. The primary
+mechanism is available to any artifact. The shared reporting policy defaults to
+2,000,000 characters of selected full-row fields per rendering; omitted groups
+remain authoritative in Velociraptor. The primary
 report and command response remain compact and link to the supplement.
 
 Generic stack analysis consumes deterministic server-side aggregate queries
@@ -460,16 +461,28 @@ retained in one pass. If more are flagged, coverage remains incomplete and the
 next decisions pass excludes accounted groups before rerunning. Prompts, model
 responses, aggregate rows, and part manifests remain transient.
 
-Stack-analysis human output groups exact repeated context, caps representative
-context at 10 groups and 10 endpoints per group, clips displayed field values
-to 320 characters, and sends compact specialized finding summaries through a
-validated semantic manager. Repeated accounting tables are capped at 100 rows
+Stack-analysis human output groups exact repeated context and sends compact
+specialized finding summaries through a validated semantic manager. Context and
+preview limits come from the shared reporting policy. Focused Autoruns context
+uses `context_items` groups and `examples_per_finding` endpoints per group; the
+specialized hunt excerpt uses `examples_per_finding` groups and up to ten endpoints
+per group. These presentation limits do not change retained source coverage.
+Repeated accounting tables are capped at 100 rows
 and narrative collections at 50 items before the hard output guard. Accounting,
 finding, filter, and normalization sections use independently bounded renderers.
-Generic finding summaries retain every compact finding and source group, render the
-first 20 findings in detail, and index every additional finding in one line. The chat
-summary has a 32,000-character guard. Canonical Markdown remains under
-the persistence policy's compact-report guard and preserves the next action.
+Generic and specialized finding summaries use the shared
+[reporting policy](../../../docs/reference/reporting-policy.md).
+They retain every available compact finding and source group, order by explicit
+priority, expand twenty findings by default and index the rest. Higher-priority
+findings displace lower-priority detail without deleting accepted findings.
+Confidence (`low`, `medium`, `high`) is separate from new report priority
+(`critical`, `high`, `medium`, `low`). Missing priority displays Not assessed;
+retained informational classifications stay intact. New informational observations
+use permitted relevant context. Apply the shared policy to generic, DetectRaptor
+and Autoruns paths, preserving native severity and evidence roles.
+Chat defaults to 32,000 characters;
+compact report pages default to 512 KiB, with linked overflow and preserved material
+coverage gaps. Profile, environment and CLI overrides resolve through one policy.
 Exact Autoruns rows remain authoritative
 in Velociraptor and are streamed through bounded drill-down validation; command
 JSON and state do not duplicate those rows. Compact state retains bounded named endpoints, persistence variants, omission counts, and query references; chat and canonical reports share a renderer and label legacy count-only host context.
@@ -540,8 +553,9 @@ Velociraptor queries. Consolidation state records compact
 model/timing/cache/fallback telemetry.
 Accounting, finding, filter, and normalization sections are independently
 bounded; tables are capped at 100 rows and narrative lists at 50 items before the
-hard guard. Canonical Markdown is subject to the compact-report persistence
-guard; chat Markdown is guarded at 32,000 characters. Command JSON returns compact
+hard guard. Canonical Markdown uses the configured compact-report publication
+budget; chat Markdown uses the configured chat budget (32,000 characters by
+default). Command JSON returns compact
 workflow counts and paths without duplicating transient suspicious context or a
 second raw context-detail payload.
 

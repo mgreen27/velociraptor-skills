@@ -25,6 +25,7 @@ from vraptor.collect import requests as collection
 from vraptor.analyze import profiles as collection_analysis_profiles
 from vraptor.analyze import references as evidence_references
 from vraptor.analyze import planning as review_planning
+from vraptor.analyze import report_priority
 
 
 ANALYSIS_PLAN_SCHEMA_VERSION = 6
@@ -42,6 +43,7 @@ CONTEXT_TYPES = {
 }
 _WORKER_TRAILING_TEXT_FIELDS = {
     "FINDING": 4,
+    "PRIORITY": 3,
     "CONTEXT": 4,
     "LIMITATION": 1,
     "FOLLOW_UP": 1,
@@ -50,9 +52,16 @@ _WORKER_TRAILING_TEXT_FIELDS = {
 _SYNTHESIS_TRAILING_TEXT_FIELDS = {
     "FINDING": 4,
     "CONTEXT": 4,
+    "PRIORITY": 3,
 }
 SOURCE_ROW_NUMBER_FIELD = "_AnalysisSourceRowNumber"
 CONFIDENCE_VALUES = {"low", "medium", "high"}
+CONFIDENCE_INSTRUCTION = (
+    "Use FINDING<TAB>id<TAB>low|medium|high<TAB>tactics<TAB>text. "
+    "The third field is evidence confidence and must be exactly low, medium, or high. "
+    "Report priority is separate and uses critical, high, medium, or low. "
+    "Never use critical, informational, or unranked as confidence. Do not use numeric confidence."
+)
 ATTACK_TACTICS = (
     "Reconnaissance",
     "Resource Development",
@@ -107,6 +116,29 @@ def format_validation_diagnostics(
         ]
         rendered.append("{" + ", ".join(details) + "}")
     return message + (": " + "; ".join(rendered) if rendered else "")
+
+
+def normalize_confidence(value: str, *, line_number: int) -> str:
+    """Normalize formatting only; never infer confidence from priority or numbers."""
+    confidence = value.strip().casefold()
+    if confidence in CONFIDENCE_VALUES:
+        return confidence
+    # Retain only fixed vocabulary, not arbitrary model text or source values.
+    priority_only = confidence in report_priority.RETAINED_PRIORITIES
+    diagnostic = {
+        "code": "invalid_confidence",
+        "line": line_number,
+        "record": "FINDING",
+        "allowed": sorted(CONFIDENCE_VALUES),
+        "reason": "priority_used_as_confidence" if priority_only else "unsupported_confidence",
+    }
+    if priority_only:
+        diagnostic["received"] = confidence
+    raise WorkerResultError(
+        f"line {line_number} FINDING confidence must be low, medium, or high; "
+        "report priority belongs in a separate PRIORITY record",
+        diagnostics=[diagnostic],
+    )
 
 
 def csv_value(value: Any) -> Any:
@@ -1170,6 +1202,7 @@ def validate_context_worker_result(
     expected_row_count: int,
     source_rows: dict[str, dict[str, Any]],
     allow_uplift_candidates: bool = False,
+    allow_legacy_priority: bool = False,
 ) -> dict[str, Any]:
     """Validate one reference-only worker response and hydrate cited rows."""
     if isinstance(result, str):
@@ -1292,6 +1325,7 @@ def validate_context_worker_result(
     uplift_candidates: list[dict[str, Any]] = []
     uplift_refs: set[str] = set()
     seen_context: set[tuple[str, str, str, str]] = set()
+    priority_ids: set[str] = set()
     body_start = 1
 
     for line_number, line in enumerate(lines[body_start:-1], start=body_start + 1):
@@ -1318,13 +1352,7 @@ def validate_context_worker_result(
                     line=line_number,
                     record=record,
                 )
-            if confidence not in CONFIDENCE_VALUES:
-                fail(
-                    "invalid_confidence",
-                    f"line {line_number} has invalid confidence",
-                    line=line_number,
-                    record=record,
-                )
+            confidence = normalize_confidence(confidence, line_number=line_number)
             if not summary.strip():
                 fail(
                     "empty_finding",
@@ -1337,9 +1365,26 @@ def validate_context_worker_result(
                 "confidence": confidence,
                 "domains": canonical_tactics(tactic_text, line_number=line_number),
                 "summary": summary.strip(),
+                **report_priority.priority_metadata({}),
                 "rows": [],
             }
             finding_order.append(finding_id)
+        elif record == "PRIORITY":
+            if len(fields) != 4:
+                fail("invalid_priority_record", "PRIORITY requires finding, priority, and rationale",
+                     line=line_number, record=record)
+            finding_id, priority, rationale = fields[1:]
+            if finding_id not in findings or finding_id in priority_ids:
+                fail("invalid_priority_finding", "PRIORITY finding is unknown or duplicated",
+                     line=line_number, record=record)
+            try:
+                metadata = report_priority.validated_priority(
+                    priority, rationale, allow_legacy=allow_legacy_priority,
+                )
+            except ValueError as exc:
+                fail("invalid_priority", str(exc), line=line_number, record=record)
+            findings[finding_id].update(metadata)
+            priority_ids.add(finding_id)
         elif record == "EVIDENCE":
             if len(fields) != 3:
                 fail(
@@ -1559,6 +1604,7 @@ def validate_context_worker_result(
 
     return {
         "protocol": CONTEXT_WORKER_PROTOCOL,
+        "priority_schema_version": report_priority.SCHEMA_VERSION,
         "artifact": expected_artifact,
         "chunk_index": chunk_index,
         "chunk_count": chunk_count,
@@ -1838,6 +1884,8 @@ def validate_analysis_story(
                     "line": line_number,
                     "record": "EVIDENCE",
                     "ref": ref,
+                    "allowed": sorted(evidence_sources)[:50],
+                    "reason": "context_only_reference" if ref in context_sources else "unknown_reference",
                 }
             )
             continue
@@ -1852,6 +1900,7 @@ def validate_analysis_story(
 
     findings: dict[str, dict[str, Any]] = {}
     finding_order: list[str] = []
+    priority_ids: set[str] = set()
     for line_number, line in enumerate(sections["FINDINGS"], start=1):
         if line in {"None.", "- None."}:
             continue
@@ -1868,8 +1917,9 @@ def validate_analysis_story(
             finding_id, confidence, domain_text, summary = fields[1:]
             if not finding_id or finding_id in findings:
                 raise ValueError("synthesis FINDING id is invalid or duplicated")
-            if confidence not in CONFIDENCE_VALUES or not summary.strip():
-                raise ValueError("synthesis FINDING confidence or text is invalid")
+            confidence = normalize_confidence(confidence, line_number=line_number)
+            if not summary.strip():
+                raise ValueError("synthesis FINDING text is empty")
             submitted_tactics = [
                 value.strip() for value in domain_text.split(",") if value.strip()
             ]
@@ -1891,10 +1941,19 @@ def validate_analysis_story(
                 "confidence": confidence,
                 "domains": domains,
                 "summary": summary.strip(),
+                **report_priority.priority_metadata({}),
                 "evidence": [],
                 "_supported_domains": set(),
             }
             finding_order.append(finding_id)
+        elif fields[0] == "PRIORITY":
+            if len(fields) != 4:
+                raise ValueError("synthesis PRIORITY requires finding, priority, and rationale")
+            finding_id, priority, rationale = fields[1:]
+            if finding_id not in findings or finding_id in priority_ids:
+                raise ValueError("synthesis PRIORITY finding is unknown or duplicated")
+            findings[finding_id].update(report_priority.validated_priority(priority, rationale))
+            priority_ids.add(finding_id)
         elif fields[0] == "EVIDENCE":
             if len(fields) != 3:
                 raise ValueError(
@@ -1923,7 +1982,7 @@ def validate_analysis_story(
         else:
             diagnostics = [
                 {
-                    "allowed": ["FINDING", "EVIDENCE"],
+                    "allowed": ["FINDING", "EVIDENCE", "PRIORITY"],
                     "code": "unsupported_record",
                     "line": line_number,
                     "record": "FINDINGS",
@@ -2004,9 +2063,13 @@ def validate_analysis_story(
         evidence_references.parse_source_reference(ref)
         source = context_sources.get(ref)
         if source is None:
-            raise ValueError(
+            raise WorkerResultError(
                 f"synthesis CONTEXT line {line_number} is not present in "
-                "accepted worker context"
+                "accepted worker context",
+                diagnostics=[{"code": "unavailable_context", "record": "CONTEXT",
+                              "line": line_number, "ref": ref,
+                              "allowed": sorted(context_sources)[:50],
+                              "reason": "evidence_only_reference" if ref in evidence_sources else "unknown_reference"}],
             )
         if not summary.strip():
             raise ValueError(
@@ -2036,6 +2099,7 @@ def validate_analysis_story(
 
     return {
         "format": "analysis-story-v2",
+        "priority_schema_version": report_priority.SCHEMA_VERSION,
         "task": task.strip(),
         "question": question.strip(),
         "status": status,

@@ -317,7 +317,7 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
         self.assertNotIn(marker, prompt)
         self.assertIn("EVIDENCE\tF1\tS0001-R1", prompt)
         self.assertIn(
-            "Inside FINDINGS, emit only FINDING and EVIDENCE records",
+            "Inside FINDINGS, emit only FINDING, PRIORITY, and EVIDENCE records",
             prompt,
         )
         self.assertIn(
@@ -1533,7 +1533,7 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
         self.assertIn("### Next action", chat_summary)
         self.assertLessEqual(
             len(chat_summary),
-            analysis_summary.MAX_CHAT_SUMMARY_CHARS,
+            analysis_summary.current_policy().chat_chars,
         )
 
     def test_compact_result_keeps_all_findings_and_indexes_after_twenty(self):
@@ -1565,15 +1565,17 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
         self.assertEqual(compact["findings_omitted_from_summary"], 0)
         self.assertEqual(len(compact["findings"]), 25)
         self.assertEqual(len(compact["findings"][19]["examples"]), 1)
-        self.assertEqual(compact["findings"][20]["examples"], [])
+        self.assertEqual(len(compact["findings"][20]["examples"]), 1)
         self.assertEqual(len(compact["findings"][20]["sources"]), 1)
 
         rendered = "\n".join(analysis_summary.render_compact_findings(compact))
         self.assertIn("### F20: Finding summary 20.", rendered)
         self.assertNotIn("### F21: Finding summary 21.", rendered)
+        self.assertNotIn("command-21", rendered)
+        self.assertEqual(len(result["findings"][20]["evidence"]), 1)
         self.assertIn("### Additional findings index", rendered)
-        self.assertIn("`F21` [medium] Finding summary 21.", rendered)
-        self.assertIn("`F25` [high] Finding summary 25.", rendered)
+        self.assertIn("`F21` [Not assessed; confidence=medium] Finding summary 21.", rendered)
+        self.assertIn("`F25` [Not assessed; confidence=high] Finding summary 25.", rendered)
         self.assertIn(
             "Finding representation: 20 detailed, 5 indexed, 0 unavailable.",
             rendered,

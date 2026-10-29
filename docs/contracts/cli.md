@@ -76,6 +76,38 @@ work, 1 for runtime/transport failure, and 2 for incomplete review, including
 also uses 2 for invalid arguments. Inspect the result status, not the exit code
 alone. Legacy routes retain their existing exit/status behavior.
 
+Operational commands own one logger from dispatch to termination. Nested legacy
+routes reuse it; `summarize` and `ai test` use the same accounting as analysis.
+Case-bound operations use case logs; other operations use
+`${XDG_STATE_HOME:-~/.local/state}/vraptor/logs`. Explicit `--log-file` overrides
+the destination. Help and log inspection do not write logs.
+`setup init` uses the user-level destination to preserve workspace initialization
+semantics; an explicit `--log-file` still overrides it.
+
+Final structured analysis, saved-synthesis and AI-management results include
+`token_usage`: command-scoped known counters, attempts/retries, provider/model
+groups, usage completeness, log completeness and persistence state. A concise
+command token summary also goes to stderr; stdout remains one structured result.
+`--no-log-file` disables persistence while retaining in-memory accounting and
+returned counters. Cached input is included in input, never added twice.
+
+`vraptor logs usage --id CASE --case-root PATH [--json] [--ledger-only]` reports
+read-only retained totals and the latest operation separately. It works without
+server credentials or a usable connection configuration. Exit 2 means coverage
+gaps or inconsistent records; it does not mean zero usage. See the
+[logging contract](../reference/velociraptor-logging.md#usage-reporting).
+Use `--global` instead of `--id` to inspect the user-level ledger. Operation
+summaries include zero-call runs; incomplete operation lifecycles and unavailable
+provider telemetry remain explicit coverage gaps.
+
+Report-producing commands accept `--report-*` overrides for the shared
+`[reporting]` policy. These affect presentation without changing analysis-cache
+identity. `vraptor reports render --checkpoint PATH [--output-dir PATH]` renders
+retained host/hunt results offline and preserves original checkpoints and hashed
+artifact reports. See [reporting policy](../reference/reporting-policy.md) for
+priority ordering, configuration precedence, pagination and unavailable legacy
+examples. Caller-written assessments remain separate publications.
+
 Use `dfir setup init --id ir1234` once to create/reuse a standalone workspace.
 `--case-root` selects its parent; `--investigation-dir` accepts an exact folder
 ending in the ID. Existing `AGENTS.md` and investigation data are preserved.
@@ -129,8 +161,14 @@ vraptor setup stop --id local01 --stop-server
 `setup init` remains offline. Startup prompts only on a terminal and accepts
 equivalent noninteractive inputs. Existing API YAML connects directly without
 remote acquisition. `--fetch-config` enables copying missing configurations over
-SSH using an explicit/configured `--server-ip`; `--provision-api` and
-`--provision-client` separately permit generation of missing remote files.
+SSH using an explicit/configured `--server-ip`; `--provision-api` prepares the selected account before acquiring credentials,
+even with cached YAML. Without explicit remote bootstrap configuration, it prompts
+for manual administrator account setup; `--api-account-ready` acknowledges that
+step without bypassing selected-user verification. `--bootstrap-api-config` and
+`--bootstrap-api-user` select a remote provisioning-only connection. The credential
+stays on the SSH host and cannot be the operational identity. Generation never
+sets roles; existing accounts are unchanged. `--provision-client` separately
+permits generation of missing endpoint YAML.
 `--regenerate-remote-api` explicitly replaces the selected remote API YAML.
 `--force` refreshes the local copy when acquisition is enabled.
 
@@ -272,8 +310,9 @@ There is no `workspace.json`, new case-level `vraptor` directory, or run hierarc
 ## Optional synthesis and saved candidates
 
 Host/collection and live-hunt analysis accept `--synthesis none|full` (standalone
-default: `none`). Use `full` explicitly for harness synthesis. Caller-led workflows own the
-final review. `analysis-results` retrieves bounded saved candidates without model
+default: `full`). Use `--synthesis none` explicitly for preliminary candidates and
+caller-owned final review. `--skip-ai` disables both analysis and synthesis model
+calls. `analysis-results` retrieves bounded saved candidates without model
 calls; `summarize` reviews a saved host request or streaming-hunt checkpoint only.
 See [analysis synthesis](../reference/analysis-synthesis.md) for source selectors,
 cache invalidation, persistence and coverage semantics.

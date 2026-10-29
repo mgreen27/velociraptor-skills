@@ -492,6 +492,8 @@ def resolve_analysis_limits(
             values[field_name] = (
                 correction_attempts(raw)
                 if field_name.endswith("correction_attempts")
+                else "max"
+                if raw == "max" and field_name in {"maximum_input_tokens", "maximum_output_tokens"}
                 else _positive_int(raw, environment_name)
             )
             sources[field_name] = selected_source
@@ -511,7 +513,34 @@ def resolve_analysis_limits(
                 sources[field_name] = LimitSource(kind="cli", name=source.name, explicit=True)
                 environment_fields.discard(field_name)
                 environment_fields.discard("operational_context_tokens")
-    if profile_budget:
+    maximum_fields = {name for name in ("maximum_input_tokens", "maximum_output_tokens") if values.get(name) == "max"}
+    if maximum_fields:
+        from vraptor.agent.model_budgets import MIN_INPUT_TOKENS, model_budget
+        selected_execution = execution
+        if selected_execution is None:
+            from vraptor.agent.config import resolve_agent_execution
+            selected_execution = resolve_agent_execution(
+                cli_values={key: value for key, value in (("config_file", config_path), ("execution_profile", profile_name)) if value},
+                repo_root=REPO_ROOT,
+                process_environment=environment if environment is not None else None,
+                allow_missing_credentials=True,
+            )
+        route = selected_execution.route
+        reference = model_budget(route.provider, route.model)
+        context = route.model_context_tokens or (reference.context_tokens if reference else 0)
+        output_cap = route.model_max_output_tokens or (reference.max_output_tokens if reference else 0)
+        if not context or not output_cap:
+            raise AnalysisLimitsError("Token budget max requires a recognized model or explicit deployment context/output ceilings")
+        if reference:
+            context = min(context, reference.context_tokens)
+            output_cap = min(output_cap, reference.max_output_tokens)
+        if "maximum_output_tokens" in maximum_fields:
+            values["maximum_output_tokens"] = min(output_cap, context - MIN_INPUT_TOKENS)
+        output = values.get("maximum_output_tokens", DEFAULT_MAXIMUM_OUTPUT_TOKENS)
+        if "maximum_input_tokens" in maximum_fields:
+            values["maximum_input_tokens"] = min(context - output, reference.standard_price_input_ceiling if reference else context - output)
+        model_context = context
+    if profile_budget or maximum_fields:
         derived = derive_profile_budgets(
             values.get("maximum_input_tokens", DEFAULT_MAXIMUM_INPUT_TOKENS),
             values.get("maximum_output_tokens", DEFAULT_MAXIMUM_OUTPUT_TOKENS),

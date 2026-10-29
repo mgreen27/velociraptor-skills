@@ -3,6 +3,9 @@
 Add `--skip-ai` to `dfir hunt analyze` or
 `dfir collect analyze` (including host-analysis workflows).
 The switch bypasses AI credentials, model calls and semantic consolidation.
+It takes precedence over the default `--synthesis full` and any explicit
+`--synthesis` value. `--synthesis none` alone disables synthesis but still runs
+artifact/chunk AI analysis.
 Readiness, source selection, collection reuse and source validation still apply.
 It does not prevent an otherwise authorized collection or configured missing-client
 retry; use exact existing requests and hunts when collection reuse is required.

@@ -149,8 +149,11 @@ calling AI. `--skip-ai` alone still applies the default cutoff and writes the
 filtered residual CSV. A run with no retained groups writes a header-only CSV.
 
 The terminal summary and `analysis-hunt.md` show source/GoldenDB/residual counts,
-AI-reviewed identities, excluded counts, severity totals, up to five representative
-suspicious findings, and GoldenDB prospect counts. Elapsed seconds cover the
+AI-reviewed identities, excluded counts, severity totals, representative
+suspicious findings, and GoldenDB prospect counts. Detail uses the shared
+[reporting policy](../../../docs/reference/reporting-policy.md)
+(twenty findings by default), with additional findings indexed and terminal
+output bounded by the chat budget. Elapsed seconds cover the
 Autoruns command through AI classification (including its server query), with
 cache reuse shown separately; report and state paths are printed by the CLI.
 

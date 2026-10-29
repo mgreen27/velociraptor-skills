@@ -12,7 +12,7 @@ import tempfile
 
 import yaml
 
-from . import readiness, readiness_state, settings, workspace
+from . import api_provisioning, readiness, readiness_state, settings, workspace
 from .case_layout import safe_component
 from .resources import resource_root
 
@@ -110,9 +110,12 @@ def parser():
     result.add_argument("--evidence-type", choices=TYPES)
     for flag in ("settings-file", "case-root", "server-profile", "api-client", "client-config",
                  "evidence-path", "hostname", "client-id", "workspace", "velociraptor-bin",
-                 "server-ip", "api-user", "ssh-user", "ssh-key", "run-as", "org-id"):
+                 "server-ip", "api-user", "ssh-user", "ssh-key", "run-as", "org-id",
+                 "bootstrap-api-config", "bootstrap-api-user"):
         result.add_argument("--" + flag)
     result.add_argument("--api-role-profile", choices=("investigation", "provisioning-admin"))
+    result.add_argument("--api-account-ready", action="store_true",
+                        help="Confirm the generic manual account step is complete; operational access is still verified.")
     for flag in ("startup-timeout-seconds", "ready-timeout-seconds", "grpc-max-message-bytes"):
         result.add_argument("--" + flag, type=int)
     result.add_argument("--host-label", action="append")
@@ -151,6 +154,9 @@ def _check_binding(previous, args, metadata=None):
         raise ValueError("Existing investigation is bound to another server profile.")
     if previous.get("mode") and previous["mode"] != MODES[args.mode]:
         raise ValueError("Existing investigation is bound to another setup mode.")
+    bound_user = previous.get("api", {}).get("identity")
+    if bound_user and getattr(args, "api_user", None) and args.api_user != bound_user:
+        raise ValueError("Selected API user differs from the existing investigation binding.")
     saved = previous.get("setup", {})
     bound_fields = ("evidence_path", "workspace", "local_server_workspace", "org_id")
     if args.mode != "live-remote":
@@ -167,13 +173,13 @@ def _check_binding(previous, args, metadata=None):
             raise ValueError("API configuration selects a different credential identity.")
 
 
-def _acquire(args, snapshot, previous):
+def _acquire(args, snapshot, previous, provisioning=None):
     """Validate fetched credentials before replacing any existing local files."""
     with ExitStack() as cleanup:
         candidates = argparse.Namespace(**vars(args))
         replacements = []
         _fetch(args, snapshot, candidates, replacements, cleanup)
-        if not replacements:
+        if not replacements and not provisioning and not getattr(args, "bootstrap_api_user", None):
             return
         try:
             metadata = readiness.validate_api_client_security(Path(candidates.api_client))
@@ -181,8 +187,14 @@ def _acquire(args, snapshot, previous):
             raise ValueError("Fetched API configuration failed credential validation; existing files were preserved.") from None
         if args.api_user and args.api_user != metadata["identity"]:
             raise ValueError("Fetched API configuration has a different identity; existing files were preserved.")
+        bootstrap_user = getattr(args, "bootstrap_api_user", None)
+        if bootstrap_user and metadata["identity"].casefold() == bootstrap_user.casefold():
+            raise ValueError("Bootstrap credentials cannot be used as the operational API identity.")
+        if (provisioning and provisioning.get("ca_sha256")
+                and metadata.get("ca_sha256") != provisioning["ca_sha256"]):
+            raise ValueError("Operational credentials and provisioning server have different CA bindings.")
         _check_binding(previous, candidates, metadata)
-        if args.mode != "live-remote":
+        if replacements and args.mode != "live-remote":
             def client_identity(path):
                 try:
                     config = yaml.safe_load(Path(path).read_text())["Client"]
@@ -196,6 +208,9 @@ def _acquire(args, snapshot, previous):
             if candidates.client_config != args.client_config and Path(args.client_config).is_file():
                 if identity != client_identity(args.client_config):
                     raise ValueError("Endpoint server/enrollment identity changed; existing files were preserved.")
+        if replacements or provisioning:
+            readiness.verify_api_authorization(Path(candidates.api_client), api_user=metadata["identity"],
+                                               role_profile=args.api_role_profile)
         for staged, destination in replacements:
             staged.replace(destination)
 
@@ -221,6 +236,8 @@ def _fetch(args, snapshot, candidates, replacements, cleanup):
                     if path.is_file():
                         continue
             raise ValueError(f"Missing {field.replace('_', ' ')}: supply existing YAML or explicitly select --fetch-config.")
+        if field == "api_client" and not args.api_user:
+            raise ValueError("Configure api_user or pass --api-user before acquiring API credentials.")
         if not args.server_ip:
             raise ValueError("Credential acquisition requires --server-ip or a configured connection address.")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,6 +282,8 @@ def start(args, snapshot, previous, state_path, *, records=None):
     from . import lifecycle
     if args.mode not in MODES:
         raise ValueError("Unknown setup mode.")
+    if args.api_account_ready and not args.provision_api:
+        raise ValueError("--api-account-ready requires --provision-api.")
     if args.mapping_id and args.mode == "live-remote":
         raise ValueError("--mapping-id applies only to dead-disk setup.")
     args.server_profile = args.server_profile or ("local" if args.mode == "local-deaddisk" else args.engagement_id)
@@ -334,7 +353,10 @@ def start(args, snapshot, previous, state_path, *, records=None):
                                                   **args.local_server_options)
             args.api_client, args.client_config = str(local["api_client"]), str(local["client_config"])
         else:
-            _acquire(args, snapshot, previous)
+            if getattr(args, "bootstrap_api_user", None) and args.api_user and args.api_user.casefold() == args.bootstrap_api_user.casefold():
+                raise ValueError("The bootstrap account cannot be the operational API user.")
+            provisioning = api_provisioning.prepare_account(args, snapshot)
+            _acquire(args, snapshot, previous, provisioning)
         _check_binding(previous, args)
         if args.mode == "live-remote":
             args.manifest_out = None

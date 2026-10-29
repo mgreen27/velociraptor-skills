@@ -26,12 +26,15 @@ continue to use `AI_SKILLS_ANALYST_AGENT_MAX_RETRIES` separately.
 ```bash
 vraptor analyze --id IR1234 --client C.1234abcd \
   --request-id REQUEST_ID --question 'Was malicious execution observed?' \
-  --retry-failed
+  --synthesis full --retry-failed
 ```
 
 Use the original question, analysis settings, time bounds and case connection.
 The exact request is required; the option cannot be combined with reset, force,
 preparation or report-only rebuilding. It never recollects evidence.
+Generated continuation commands preserve `--synthesis none|full`. When recovering
+final synthesis, keep `--synthesis full` (also the default). Explicit
+`--synthesis none` skips final review; `--skip-ai` disables all model work.
 
 Accepted artifacts are reused after source and report-hash verification. Failed
 artifacts reacquire their existing flow rows once; accepted chunks are restored
@@ -44,8 +47,21 @@ checkpoints must review the failed artifact again.
 `--reset-artifact` and `--reset-analysis` still explicitly discard accepted work.
 Ordinary reruns keep terminal failed artifacts held; use `--retry-failed` to
 resume them. Final synthesis can also be resumed by rerunning the saved request.
+For a synthesis-only failure with accepted checkpoints, `vraptor summarize
+--checkpoint /path/to/request-analysis.json` validates the retained inputs and
+runs only final synthesis, without querying flows or rerunning artifact analysis.
+Both forms review the saved request's scope. `--reset-artifact` invalidates an
+artifact's accepted work; it does not narrow a multi-artifact request to that artifact.
 
 ## Troubleshooting and retention
+
+`FINDING` confidence accepts only `low`, `medium`, or `high`; chunk and synthesis
+validators normalize surrounding whitespace and casing. Confidence measures
+evidence certainty, separately from report priority. Priority-only labels such as
+`critical` are rejected, as are numeric scores and unknown labels; no confidence
+is inferred or silently substituted. `invalid_confidence` diagnostics include the
+allowed values and a safe reason code. Recognized priority-only labels can be
+retained as `received`; arbitrary rejected text is excluded from diagnostics.
 
 Every host analysis writes `analysis/analysis-diagnostics.json` under its request.
 It records stage/task identity, attempts, provider category, elapsed time,
@@ -56,6 +72,38 @@ the diagnostic path and a shell-quoted resume command. Model output, provider
 bodies, credentials and source values are excluded. `--debug` adds the existing
 provider diagnostics; `--debug-chunk-prompts` explicitly retains evidence-bearing
 prompts/responses.
+
+Synthesis distinguishes candidate evidence references from accepted context
+references. A context-only row cannot be promoted to `EVIDENCE`, and a candidate
+row cannot be emitted as `CONTEXT` unless it was also accepted as context.
+Downgraded candidates use `DISPOSITION`; Python creates their lead/context rows.
+Wrong-role, unknown-source and wrong-candidate errors include structured defects
+and bounded allowed references in correction prompts and diagnostics. If there
+are no accepted context references, `RELEVANT_CONTEXT` must contain `None.`.
+References are never guessed, silently reassigned or dropped to make review pass.
+
+Supported-candidate mapping errors distinguish `missing_mapped_finding` from
+`mapped_finding_evidence_mismatch`. The latter includes the candidate ID, output
+finding ID, selected disposition references, missing evidence references and the
+allowed intersection of candidate evidence with that output finding. Every
+selected disposition reference must appear as an `EVIDENCE` record under the same
+output finding ID. Merged findings include the union of selected references from
+their supported candidate dispositions; candidate rows are never silently added.
+
+`summarize` writes a separate `synthesis-diagnostics.json` beside its checkpoint.
+This is the latest synthesis invocation, including cache hits, not a replacement
+for the original `analysis-diagnostics.json`. It records operation ID, provider,
+model, timestamps, status, bounded provider-call timing and per-attempt validation
+diagnostics. It retains at most 200 task/call records, seven correction attempts
+per task and 50 defects/references per diagnostic list; omissions are counted.
+No raw source values, response bodies or credentials are retained. The file is
+updated before dispatch and after each call so an interrupted run is identifiable.
+Cache hits show zero model calls. JSON and text output expose the diagnostics path.
+Cache hits regenerate the derived summary using current reporting limits without
+changing the accepted checkpoint or calling a model. Diagnostic identifiers are
+restricted to protocol references and known vocabulary; arbitrary model-supplied
+IDs and labels are excluded even when they contain only letters or spaces.
+Checkpoint conflicts preserve the changed checkpoint and retain failure diagnostics.
 
 `artifact-recovery/*.json` retains one current generation of accepted compact
 chunk decisions per artifact, with hashes and no copied row fields. Request
@@ -77,7 +125,7 @@ equivalent prose without losing distinct coverage gaps.
 ## Offline validation
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_analysis_recovery.py tests/test_host_final_review.py tests/test_agent_analysis_defaults.py tests/core/test_core_collection_analysis_integration.py tests/core/test_core_host_analysis_state.py
+.venv/bin/python -m pytest -q tests/test_analysis_recovery.py tests/test_host_final_review.py tests/test_synthesis_reference_recovery.py tests/test_saved_synthesis_diagnostics.py tests/test_analysis_operator_status.py tests/test_agent_analysis_defaults.py tests/core/test_core_collection_analysis_integration.py tests/core/test_core_host_analysis_state.py
 ```
 
 Synthetic tests cover correction budgets, terminal failures, failed-chunk reuse,

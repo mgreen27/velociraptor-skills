@@ -24,6 +24,9 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from vraptor.agent import diagnostics as agent_diagnostics
 from vraptor.analyze import limits as analysis_limits
 from vraptor.analyze import recovery
+from vraptor.analyze.reporting import current_policy
+from vraptor.analyze.report_priority import display_priority, priority_key, priority_metadata, rank_findings
+from vraptor.analyze.report_publication import publish_report
 from vraptor.common import atomic_io
 from vraptor.common import token_budget
 from vraptor.agent.config import ResolvedAgentExecution
@@ -67,10 +70,6 @@ REVIEW_SCOPES = {
     REVIEW_SCOPE_MANAGED_COLLECTION,
     REVIEW_SCOPE_AD_HOC,
 }
-MAX_SPECIALIZED_ARTIFACTS = 100
-MAX_SPECIALIZED_FINDINGS = 10
-MAX_SPECIALIZED_EXAMPLES = 10
-MAX_SPECIALIZED_TEXT_CHARS = 320
 MAX_SPECIALIZED_FINDING_INPUT_GROUPS = 200
 MAX_RUN_RECORDS = 20
 MAX_FAILED_CHUNK_ERROR_CHARS = 2048
@@ -92,9 +91,6 @@ MAX_DETECTRAPTOR_TRANSPORT_ERRORS = 5
 MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS = 20
 DETECTRAPTOR_CONTEXT_FILENAME = "detectraptor-interesting-context.json"
 DETECTRAPTOR_UPLIFT_FILENAME = "detectraptor_whitelist_candidates.csv"
-MAX_DETECTRAPTOR_REPORT_NOTES = 100
-MAX_DETECTRAPTOR_REPORT_EVENTS = 3
-MAX_DETECTRAPTOR_REPORT_SOURCE_REFS = 3
 DETECTRAPTOR_UPLIFT_FIELDS = (
     "Detection",
     "Scope",
@@ -353,11 +349,12 @@ def _summarize_detectraptor_uplift_csv(path: Path) -> dict[str, int]:
     return summary
 
 
-def _compact_specialized_text(value: Any) -> str:
+def _compact_specialized_text(value: Any, *, limit: int | None = None) -> str:
+    limit = current_policy().preview_chars if limit is None else limit
     text = " ".join(str(value or "").split()).replace("|", "\\|")
-    if len(text) <= MAX_SPECIALIZED_TEXT_CHARS:
+    if len(text) <= limit:
         return text
-    return text[: MAX_SPECIALIZED_TEXT_CHARS - 1].rstrip() + "…"
+    return text[: limit - 1].rstrip() + "…"
 
 
 def _detectraptor_event_identity(event: Mapping[str, Any]) -> str:
@@ -400,12 +397,12 @@ def _detectraptor_representative_events(
         identity = _detectraptor_event_identity(event)
         if identity and identity not in selected_identities:
             add(event)
-        if len(selected) >= MAX_DETECTRAPTOR_REPORT_EVENTS:
+        if len(selected) >= current_policy().detectraptor_events:
             return selected
     if ordered:
         for index in (0, len(ordered) // 2, len(ordered) - 1):
             add(ordered[index])
-            if len(selected) >= MAX_DETECTRAPTOR_REPORT_EVENTS:
+            if len(selected) >= current_policy().detectraptor_events:
                 break
     return selected
 
@@ -442,6 +439,7 @@ def _detectraptor_direct_report_groups(
             groups.append(
                 {
                     "detection": detection,
+                    **priority_metadata(finding),
                     "confidence": str(finding.get("confidence") or "unknown"),
                     "summary": str(finding.get("summary") or "Reportable finding"),
                     "count": occurrence_count or 1,
@@ -475,6 +473,7 @@ def _consolidate_detectraptor_report_groups(
             key,
             {
                 "detection": detection,
+                **priority_metadata(raw),
                 "confidence": confidence,
                 "summary": summary,
                 "count": 0,
@@ -487,6 +486,8 @@ def _consolidate_detectraptor_report_groups(
                 "direct_partition": False,
             },
         )
+        if priority_key(raw) < priority_key(item):
+            item.update(priority_metadata(raw))
         item["count"] += max(1, int(raw.get("count") or 1))
         events = [
             event
@@ -518,9 +519,7 @@ def _consolidate_detectraptor_report_groups(
     return sorted(
         consolidated.values(),
         key=lambda item: (
-            {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(
-                str(item["confidence"]), 4
-            ),
+            priority_key(item),
             -int(item["count"]),
             str(item["detection"]),
             str(item["summary"]),
@@ -538,7 +537,7 @@ def _render_detectraptor_report_notes(
     if not consolidated:
         return ["- No malicious or potentially malicious findings selected yet."]
     lines: list[str] = []
-    for item in consolidated[:MAX_DETECTRAPTOR_REPORT_NOTES]:
+    for item in rank_findings(consolidated)[:current_policy().detectraptor_notes]:
         confidence = _compact_specialized_text(item["confidence"]).upper()
         summary = _compact_specialized_text(item["summary"])
         lines.extend(
@@ -546,6 +545,7 @@ def _render_detectraptor_report_notes(
                 f"### {confidence} — {_compact_specialized_text(item['detection'])}",
                 "",
                 summary,
+                f"- Report priority: `{display_priority(item)}`",
                 "",
             ]
         )
@@ -595,7 +595,7 @@ def _render_detectraptor_report_notes(
                 )
         source_refs = sorted(item["source_refs"])
         if source_refs:
-            visible = source_refs[:MAX_DETECTRAPTOR_REPORT_SOURCE_REFS]
+            visible = source_refs[:current_policy().detectraptor_source_refs]
             suffix = (
                 f", plus {len(source_refs) - len(visible)} more"
                 if len(source_refs) > len(visible)
@@ -611,9 +611,13 @@ def _render_detectraptor_report_notes(
                 f"- Full hydrated events: `{_compact_specialized_text(context_ledger)}`"
             )
         lines.append("")
-    if len(consolidated) > MAX_DETECTRAPTOR_REPORT_NOTES:
+    if len(consolidated) > current_policy().detectraptor_notes:
+        lines.extend("- Indexed [" + display_priority(item) + "]: "
+                     + _compact_specialized_text(item.get("detection")) + " — "
+                     + _compact_specialized_text(item.get("summary"))
+                     for item in rank_findings(consolidated)[current_policy().detectraptor_notes:])
         lines.append(
-            f"- {len(consolidated) - MAX_DETECTRAPTOR_REPORT_NOTES} additional "
+            f"- {len(consolidated) - current_policy().detectraptor_notes} additional "
             "assessment group(s) are retained in the context ledger."
         )
     return lines
@@ -640,9 +644,9 @@ def _specialized_finding_inputs(
     for raw in findings:
         if not isinstance(raw, Mapping):
             continue
-        artifact = _compact_specialized_text(raw.get("artifact") or "unknown")
+        artifact = _compact_specialized_text(raw.get("artifact") or "unknown", limit=320)
         summary = _compact_specialized_text(
-            raw.get("summary") or raw.get("title") or "Finding recorded"
+            raw.get("summary") or raw.get("title") or "Finding recorded", limit=320
         )
         key = (artifact, summary)
         record = grouped.setdefault(
@@ -650,10 +654,13 @@ def _specialized_finding_inputs(
             {
                 "artifact": artifact,
                 "summary": summary,
+                **priority_metadata(raw),
                 "count": 0,
                 "review_ids": set(),
             },
         )
+        if priority_key(raw) < priority_key(record):
+            record.update(priority_metadata(raw))
         record["count"] += 1
         review_id = str(raw.get("review_id") or "").strip()
         if review_id:
@@ -665,6 +672,7 @@ def _specialized_finding_inputs(
     return [
         {
             "source_id": f"S{index}",
+            **priority_metadata(item),
             "artifact": item["artifact"],
             "summary": item["summary"],
             "count": int(item["count"]),
@@ -680,7 +688,7 @@ def _deterministic_specialized_finding_summary(
     source_hash: str,
     error: str = "",
 ) -> dict[str, Any]:
-    visible = inputs[:MAX_SPECIALIZED_FINDING_INPUT_GROUPS]
+    visible = rank_findings(inputs)[:MAX_SPECIALIZED_FINDING_INPUT_GROUPS]
     limitations = [
         "Semantic finding consolidation was unavailable; exact normalized summaries "
         "remain separate."
@@ -702,6 +710,7 @@ def _deterministic_specialized_finding_summary(
         "groups": [
             {
                 "summary": item["summary"],
+                **priority_metadata(item),
                 "artifacts": [item["artifact"]],
                 "source_ids": [item["source_id"]],
                 "record_count": int(item["count"]),
@@ -733,7 +742,7 @@ def _parse_specialized_finding_output(
             if len(fields) != 3:
                 raise ValueError("specialized GROUP requires id and summary")
             group_id = fields[1].strip()
-            summary = _compact_specialized_text(fields[2])
+            summary = _compact_specialized_text(fields[2], limit=320)
             if not group_id or not summary or group_id in groups:
                 raise ValueError("specialized finding manager GROUP is invalid")
             groups[group_id] = {"summary": summary, "source_ids": []}
@@ -827,7 +836,7 @@ async def consolidate_specialized_findings_async(
         state["specialized_finding_summary"] = result
         return result
 
-    visible = inputs[:MAX_SPECIALIZED_FINDING_INPUT_GROUPS]
+    visible = rank_findings(inputs)[:MAX_SPECIALIZED_FINDING_INPUT_GROUPS]
     if spec is None and execute is None:
         result = _deterministic_specialized_finding_summary(
             inputs,
@@ -917,7 +926,7 @@ async def consolidate_specialized_findings_async(
         seen: set[str] = set()
         groups: list[dict[str, Any]] = []
         for raw_group in raw_groups:
-            summary = _compact_specialized_text(raw_group.get("summary"))
+            summary = _compact_specialized_text(raw_group.get("summary"), limit=320)
             source_ids = raw_group.get("source_ids")
             if not summary or not isinstance(source_ids, list) or not source_ids:
                 raise ValueError(
@@ -935,6 +944,7 @@ async def consolidate_specialized_findings_async(
             groups.append(
                 {
                     "summary": summary,
+                    **priority_metadata(min(sources, key=priority_key)),
                     "artifacts": sorted({item["artifact"] for item in sources}),
                     "source_ids": normalized_ids,
                     "record_count": sum(int(item["count"]) for item in sources),
@@ -1139,6 +1149,7 @@ def _compact_synthesis_result(value: Mapping[str, Any]) -> dict[str, Any]:
             "limitations",
             "bounded_follow_up",
             "domain_assessments",
+            "priority_schema_version",
             "analysis_status", "review_status", "synthesis_mode", "result_role", "groups",
         )
         if key in source
@@ -1152,6 +1163,7 @@ def _compact_synthesis_result(value: Mapping[str, Any]) -> dict[str, Any]:
             for key in ("id", "artifact", "confidence", "domains", "summary")
             if key in raw_finding
         }
+        finding.update(priority_metadata(raw_finding))
         evidence_rows: list[dict[str, Any]] = []
         for raw_evidence in raw_finding.get("evidence") or []:
             if not isinstance(raw_evidence, Mapping):
@@ -1162,7 +1174,7 @@ def _compact_synthesis_result(value: Mapping[str, Any]) -> dict[str, Any]:
                 if key in raw_evidence
             }
             fields = analysis_summary.preview_fields(
-                dict(raw_evidence.get("fields") or {})
+                dict(raw_evidence.get("fields") or {}), limit=320,
             )
             if fields:
                 evidence["fields"] = fields
@@ -1182,7 +1194,7 @@ def _compact_synthesis_result(value: Mapping[str, Any]) -> dict[str, Any]:
             if key in raw_context
         }
         fields = analysis_summary.preview_fields(
-            dict(raw_context.get("fields") or {})
+            dict(raw_context.get("fields") or {}), limit=320,
         )
         if fields:
             context["fields"] = fields
@@ -3959,7 +3971,7 @@ async def _analyze_detectraptor_partition(
     context_row_count = 0
     context_started = time.monotonic()
     if exact_stack:
-        for finding in initial_synthesis.get("findings") or []:
+        for finding in rank_findings(initial_synthesis.get("findings") or []):
             if not isinstance(finding, Mapping):
                 continue
             for evidence in finding.get("evidence") or []:
@@ -3976,6 +3988,7 @@ async def _analyze_detectraptor_partition(
                     {
                         "summary": str(finding.get("summary") or ""),
                         "confidence": str(finding.get("confidence") or ""),
+                        **priority_metadata(finding),
                         "count": max(1, int(fields.get("OccurrenceCount") or 1)),
                         "first_seen": fields.get("FirstSeen"),
                         "last_seen": fields.get("LastSeen"),
@@ -4125,6 +4138,7 @@ async def _analyze_detectraptor_partition(
                     "detection": partition.detection or "",
                     "source_ref": ref,
                     "confidence": metadata["confidence"],
+                    **priority_metadata(metadata),
                     "summary": metadata["summary"],
                     "payload_field": metadata["payload_field"],
                     "payload_sha256": hashlib.sha256(
@@ -5242,7 +5256,6 @@ async def _analyze_hunt_flows_locked(
             f"- Question: {question}",
             f"- Status: `{run_status}`",
             "- Report mode: progressive atomic checkpoint",
-            "- Velociraptor source of truth: yes",
             "",
             "## DetectRaptor progress",
             "",
@@ -6712,8 +6725,6 @@ def render_hunt_report(
         f"- Review scope: `{state.get('review_scope', REVIEW_SCOPE_MANAGED_COLLECTION)}`",
         f"- Analysis method: `{state.get('analysis_method', 'full')}`",
         f"- Updated: `{state.get('updated_at', '')}`",
-        "- Velociraptor source of truth: yes",
-        "- Bulk raw result export: no",
         *(
             [
                 f"- Analysis status: `{active_analysis.get('status')}`",
@@ -7070,18 +7081,7 @@ def _chat_summary_with_detectraptor_stack(
     except ValueError:
         insertion = min(len(lines), 1)
     rendered = "\n".join([*lines[:insertion], *section, *lines[insertion:]]).rstrip() + "\n"
-    if len(rendered) <= analysis_summary.MAX_CHAT_SUMMARY_CHARS:
-        return rendered
-    suffix = (
-        "\n\nChat summary reached its 32,000-character guard; consult the "
-        "linked analysis report for remaining detail.\n"
-    )
-    return (
-        rendered[: analysis_summary.MAX_CHAT_SUMMARY_CHARS - len(suffix)]
-        .rsplit("\n", 1)[0]
-        .rstrip()
-        + suffix
-    )
+    return analysis_summary.bound_chat_markdown(rendered)
 
 
 def render_specialized_hunt_section(
@@ -7160,7 +7160,7 @@ def render_specialized_hunt_section(
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
-    for artifact, item in artifacts[:MAX_SPECIALIZED_ARTIFACTS]:
+    for artifact, item in artifacts[:current_policy().artifact_sections]:
         workflow = dict(item.get("autoruns_residual_workflow") or {})
         golden = dict(item.get("autoruns_golden") or {})
         stack = dict(workflow.get("stack") or {})
@@ -7182,9 +7182,9 @@ def render_specialized_hunt_section(
         )
     if not artifacts:
         lines.append("| None | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |")
-    if len(artifacts) > MAX_SPECIALIZED_ARTIFACTS:
+    if len(artifacts) > current_policy().artifact_sections:
         lines.append(
-            f"\n{len(artifacts) - MAX_SPECIALIZED_ARTIFACTS} additional artifact(s) "
+            f"\n{len(artifacts) - current_policy().artifact_sections} additional artifact(s) "
             "remain in specialized state."
         )
 
@@ -7196,7 +7196,7 @@ def render_specialized_hunt_section(
     ]
     if golden_reductions:
         lines.extend(["", "### Autoruns GoldenDB reduction", ""])
-        for artifact, golden in golden_reductions[:MAX_SPECIALIZED_ARTIFACTS]:
+        for artifact, golden in golden_reductions[:current_policy().artifact_sections]:
             lines.append(
                 f"- `{_compact_specialized_text(artifact)}`: "
                 f"{int(golden.get('source_rows') or 0)} source; "
@@ -7225,7 +7225,7 @@ def render_specialized_hunt_section(
     ]
     if workflow_details or generic_stack_details:
         lines.extend(["", "### Streaming review", ""])
-        for label, workflow in workflow_details[:MAX_SPECIALIZED_ARTIFACTS]:
+        for label, workflow in workflow_details[:current_policy().artifact_sections]:
             stack = dict(workflow.get("stack") or {})
             classification = dict(workflow.get("classification") or {})
             context = dict(workflow.get("suspicious_context") or {})
@@ -7264,7 +7264,7 @@ def render_specialized_hunt_section(
                     f"SHA-256 `{_compact_specialized_text(potential.get('sha256'))}`"
                 )
         for artifact, stack_review in generic_stack_details[
-            :MAX_SPECIALIZED_ARTIFACTS
+            :current_policy().artifact_sections
         ]:
             lines.extend(
                 [
@@ -7294,24 +7294,9 @@ def render_specialized_hunt_section(
             ):
                 generic_leads.append((artifact, dict(pending)))
     if generic_leads:
-        severity_order = {
-            "critical": 0,
-            "high": 1,
-            "medium": 2,
-            "low": 3,
-            "info": 4,
-        }
         generic_leads.sort(
             key=lambda pair: (
-                severity_order.get(
-                    str(
-                        dict(pair[1].get("streaming_ai_review") or {}).get(
-                            "severity"
-                        )
-                        or ""
-                    ).casefold(),
-                    5,
-                ),
+                priority_key(dict(pair[1].get("streaming_ai_review") or {})),
                 int(pair[1].get("scope_row_count") or 0),
             )
         )
@@ -7321,7 +7306,7 @@ def render_specialized_hunt_section(
             "and original source rows. Findings remain provisional pending "
             "operator disposition."
         )
-        for artifact, pending in generic_leads[:MAX_SPECIALIZED_FINDINGS]:
+        for artifact, pending in generic_leads[:current_policy().detailed_findings]:
             ai_review = dict(pending.get("streaming_ai_review") or {})
             impact = dict(pending.get("impact") or {})
             review_match = dict(pending.get("review_match") or {})
@@ -7339,7 +7324,7 @@ def render_specialized_hunt_section(
             )
             lines.append(
                 f"- **{_compact_specialized_text(artifact)} "
-                f"{_compact_specialized_text(ai_review.get('severity') or 'info').upper()} "
+                f"{display_priority(ai_review)} "
                 f"{_compact_specialized_text(ai_review.get('disposition') or 'notable')}:** "
                 f"{_compact_specialized_text(ai_review.get('summary') or identity or 'Stack group')} — "
                 f"{int(review_match.get('row_count') or pending.get('scope_row_count') or 0)} occurrence(s), "
@@ -7360,12 +7345,17 @@ def render_specialized_hunt_section(
                     "  - Impacted machines: "
                     + ", ".join(
                         _compact_specialized_text(value)
-                        for value in machines[:20]
+                        for value in machines[:current_policy().context_items]
                     )
                 )
-        if len(generic_leads) > MAX_SPECIALIZED_FINDINGS:
+        if len(generic_leads) > current_policy().detailed_findings:
+            for artifact, pending in generic_leads[current_policy().detailed_findings:]:
+                review = dict(pending.get("streaming_ai_review") or {})
+                lines.append("- Indexed [" + display_priority(review) + "]: "
+                             + _compact_specialized_text(artifact) + " — "
+                             + _compact_specialized_text(review.get("summary") or "Stack group"))
             lines.append(
-                f"- {len(generic_leads) - MAX_SPECIALIZED_FINDINGS} additional "
+                f"- {len(generic_leads) - current_policy().detailed_findings} additional "
                 "follow-up finding(s) remain in specialized state."
             )
 
@@ -7377,7 +7367,7 @@ def render_specialized_hunt_section(
     ]
     if reductions:
         lines.extend(["", "### Data reduction", ""])
-        for artifact, reduction in reductions[:MAX_SPECIALIZED_FINDINGS]:
+        for artifact, reduction in reductions[:current_policy().detailed_findings]:
             lines.append(
                 f"- `{_compact_specialized_text(artifact)}` "
                 f"{_compact_specialized_text(reduction.get('classification') or 'reduction')}: "
@@ -7393,7 +7383,7 @@ def render_specialized_hunt_section(
     ]
     if case_filters:
         lines.extend(["", "### Filter decisions", ""])
-        for item in case_filters[:MAX_SPECIALIZED_FINDINGS]:
+        for item in case_filters[:current_policy().detailed_findings]:
             lines.append(
                 f"- `{_compact_specialized_text(item.get('status') or 'unknown')}` "
                 f"{_compact_specialized_text(item.get('reason') or 'No reason recorded.')} "
@@ -7411,6 +7401,26 @@ def render_specialized_hunt_section(
         if isinstance(item, Mapping)
     ]
     lines.extend(["", "### Specialized findings", ""])
+    # Older cached semantic groups may predate explicit report priority. Resolve
+    # from their stable source IDs without changing or rerunning accepted work.
+    input_by_id = {item["source_id"]: item for item in _specialized_finding_inputs(findings)}
+    enriched_groups = []
+    for item in consolidated_findings:
+        mapped = [input_by_id[source_id] for source_id in item.get("source_ids") or [] if source_id in input_by_id]
+        if not mapped or item.get("report_priority") or item.get("severity"):
+            mapped.append(item)
+        enriched_groups.append({**item, **priority_metadata(min(mapped, key=priority_key))})
+    consolidated_findings = enriched_groups
+    if consolidated_findings:
+        covered_ids = {str(value) for item in consolidated_findings for value in item.get("source_ids") or []}
+        # The semantic input cap must not become a report omission cap. Keep
+        # uncovered exact groups visible without another model invocation.
+        consolidated_findings.extend({
+            "summary": item["summary"], "artifacts": [item["artifact"]],
+            "source_ids": [source_id], "record_count": item["count"],
+            "review_ids": item["review_ids"], **priority_metadata(item),
+            "not_semantically_consolidated": True,
+        } for source_id, item in input_by_id.items() if source_id not in covered_ids)
     if consolidated_findings:
         manager = dict(finding_summary.get("manager") or {})
         lines.append(
@@ -7427,7 +7437,7 @@ def render_specialized_hunt_section(
                 f"cache hit `{bool(manager.get('cache_hit'))}`; "
                 f"fallback `{_compact_specialized_text(manager.get('fallback_reason') or 'none')}`."
             )
-        for finding in consolidated_findings[:MAX_SPECIALIZED_FINDINGS]:
+        for finding in rank_findings(consolidated_findings)[:current_policy().detailed_findings]:
             summary = _compact_specialized_text(
                 finding.get("summary") or "Finding recorded"
             )
@@ -7437,26 +7447,32 @@ def render_specialized_hunt_section(
             )
             count = int(finding.get("record_count") or 0)
             repeated = f" ({count} records)" if count > 1 else ""
-            lines.append(f"- **{artifact_names}:** {summary}{repeated}")
-        if len(consolidated_findings) > MAX_SPECIALIZED_FINDINGS:
+            lines.append(f"- [{display_priority(finding)}] **{artifact_names}:** {summary}{repeated}")
+        if len(consolidated_findings) > current_policy().detailed_findings:
+            lines.extend("- Indexed [" + display_priority(item) + "]: "
+                         + _compact_specialized_text(item.get("summary") or item.get("id"))
+                         for item in rank_findings(consolidated_findings)[current_policy().detailed_findings:])
             lines.append(
-                f"- {len(consolidated_findings) - MAX_SPECIALIZED_FINDINGS} "
+                f"- {len(consolidated_findings) - current_policy().detailed_findings} "
                 "additional consolidated finding group(s) remain in specialized state."
             )
         for limitation in finding_summary.get("limitations") or []:
             lines.append(f"- Limitation: {_compact_specialized_text(limitation)}")
     elif findings:
-        for finding in findings[:MAX_SPECIALIZED_FINDINGS]:
+        for finding in rank_findings(findings)[:current_policy().detailed_findings]:
             summary = _compact_specialized_text(
                 finding.get("summary") or finding.get("title") or "Finding recorded"
             )
             artifact = _compact_specialized_text(
                 finding.get("artifact") or "unknown"
             )
-            lines.append(f"- **{artifact}:** {summary}")
-        if len(findings) > MAX_SPECIALIZED_FINDINGS:
+            lines.append(f"- [{display_priority(finding)}] **{artifact}:** {summary}")
+        if len(findings) > current_policy().detailed_findings:
+            lines.extend("- Indexed [" + display_priority(item) + "]: "
+                         + _compact_specialized_text(item.get("summary") or item.get("id"))
+                         for item in rank_findings(findings)[current_policy().detailed_findings:])
             lines.append(
-                f"- {len(findings) - MAX_SPECIALIZED_FINDINGS} additional finding(s) "
+                f"- {len(findings) - current_policy().detailed_findings} additional finding(s) "
                 "remain in specialized state."
             )
     else:
@@ -7503,7 +7519,7 @@ def render_specialized_hunt_section(
     if autoruns_contexts:
         lines.extend(["", "### Representative specialized context", ""])
         for artifact, context, examples in autoruns_contexts[
-            :MAX_SPECIALIZED_ARTIFACTS
+            :current_policy().artifact_sections
         ]:
             lines.extend(
                 [
@@ -7517,14 +7533,14 @@ def render_specialized_hunt_section(
                             or context.get("identity_count")
                             or len(examples)
                         ),
-                        max_groups=MAX_SPECIALIZED_EXAMPLES,
+                        max_groups=current_policy().examples_per_finding,
                         max_endpoints_per_group=10,
                     ),
                 ]
             )
-        if len(autoruns_contexts) > MAX_SPECIALIZED_ARTIFACTS:
+        if len(autoruns_contexts) > current_policy().artifact_sections:
             lines.append(
-                f"- {len(autoruns_contexts) - MAX_SPECIALIZED_ARTIFACTS} "
+                f"- {len(autoruns_contexts) - current_policy().artifact_sections} "
                 "additional Autoruns workflow context set(s) remain in "
                 "specialized state."
             )
@@ -7582,8 +7598,6 @@ def render_canonical_hunt_report(
                     f"- Question: {question}",
                     f"- Task mode: `{specialized.get('task_mode', 'targeted_hunt')}`",
                     f"- Response depth: `{specialized.get('response_depth', 'standard')}`",
-                    "- Velociraptor source of truth: yes",
-                    "- Bulk raw result export: no",
                     "",
                     "## Hunt synthesis",
                     "",
@@ -7615,7 +7629,7 @@ def _write_canonical_hunt_report(
     specialized_state: Mapping[str, Any] | None = None,
 ) -> Path:
     report_path = hunt_root / REPORT_FILENAME
-    atomic_io.write_text_atomic(
+    publish_report(
         report_path,
         render_canonical_hunt_report(
             hunt_root=hunt_root,

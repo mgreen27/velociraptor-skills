@@ -67,7 +67,10 @@ cached local file is reused before SSH checks unless `--force` is supplied.
 Operational settings provide SSH user/key and remote paths; the legacy
 `VELO_REMOTE_*` variables remain compatibility inputs. API acquisition also
 uses the shared API identity (`CLI > environment/dotenv > named connection >
-connection_defaults > vraptor`). Shared SSH user/key, server and endpoint config
+connection_defaults`; no built-in remote username). Configure `api_user` or pass
+`--api-user` through shared setup before fetching or provisioning API credentials.
+Existing API YAML can supply its own identity when no username is selected;
+explicit saved identities are preserved. Shared SSH user/key, server and endpoint config
 paths, remote binary and service account can also live in `[connection_defaults]`.
 Named connections override these defaults. Default destinations are
 `<config_root>/<server-profile>_api_client.yaml` and
@@ -85,10 +88,19 @@ Successful setup prints `To configure AI, run: vraptor ai setup`; `agent`
 remains an alias for `ai`. This is a next-step note, not an automatic provider
 configuration or connectivity test. Follow the printed settings-file selector.
 
-Generation is explicit:
+Require explicit operator authorization before API-user creation or credential
+generation, then pass `--provision-api` to shared `setup start`. Honor no-provision,
+read-only and fetch-only scope. A configured username or cached YAML does not
+authorize creation. See the [shared account procedure](references/service-account-config.md).
 
-- `fetch-api --provision-api` may generate the selected API identity only after
-  confirming the remote file is absent.
+Generation uses these explicit CLI flags:
+
+- Shared `setup start --provision-api` first establishes the selected account:
+  generic installs prompt for manual administrator setup; explicitly configured
+  remote bootstrap credentials are restricted to account provisioning. See the
+  [shared account procedure](references/service-account-config.md).
+- `fetch-api --provision-api` only signs missing operational YAML, without
+  `--role`, after confirming remote file absence. It does not create a live account.
 - `fetch-client --provision-client` may generate endpoint configuration only after
   confirming the remote file is absent.
 - `fetch-api --regenerate-remote-api` replaces the selected remote API YAML and

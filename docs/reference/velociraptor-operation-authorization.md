@@ -16,9 +16,13 @@ pause for additional approval before:
 
 Normal setup connects with existing native configuration. `--fetch-config`
 authorizes acquisition of existing remote API/endpoint configurations over SSH.
-Remote creation requires the requested provisioning operation and its explicit
-`--provision-api` or `--provision-client` flag; each helper first confirms the
-target file is absent. Connection, permission and copy failures do not authorize
+API-user creation and credential generation require explicit operator authorization
+and `--provision-api`. A configured username or cached YAML alone does not authorize
+creation. Honor no-provision, read-only and fetch-only scope. Endpoint generation
+is limited to authorized `--provision-client` operations. Shared API setup first checks or
+manually prepares the live account, leaving existing accounts unchanged; file
+helpers separately confirm YAML absence. A bootstrap identity is restricted to
+account provisioning and never becomes the operational identity. Connection, permission and copy failures do not authorize
 generation. `--regenerate-remote-api` explicitly replaces the selected remote API
 credential and is never an automatic authentication-recovery step. An existing
 user instruction to create or replace those configurations is sufficient

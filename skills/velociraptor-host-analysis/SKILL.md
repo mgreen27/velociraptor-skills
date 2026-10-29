@@ -19,14 +19,15 @@ The standalone `vraptor` CLI uses the same case paths and configuration. Use
 client retries and GoldenDB uploads remain explicit. Legacy `dfir`
 routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
 
-When acting as the calling analyst, pass `--synthesis none`, retrieve bounded
-candidates with `vraptor analysis-results`, then perform the final evidence review
-and cross-artifact correlation here. Use `--synthesis full` when the user requests
-a standalone harness report. Follow the shared [synthesis contract](../../docs/reference/analysis-synthesis.md)
+Use the default full synthesis for normal analysis. Only add `--synthesis none`
+when preliminary-only analysis or caller-only final review is requested. In that
+mode, retrieve bounded candidates with `vraptor analysis-results` and perform the
+final evidence review and cross-artifact correlation here. Follow the shared
+[synthesis contract](../../docs/reference/analysis-synthesis.md)
 for saved-summary reuse, pagination, partial coverage and preliminary labels.
 
-The CLI defaults to `--synthesis none`; request `--synthesis full` explicitly
-for harness synthesis. Save caller-reviewed host conclusions as
+The CLI defaults to `--synthesis full`; `--skip-ai` takes precedence and prevents
+all model calls. Save caller-reviewed host conclusions as
 `assessment-host.md` and hunt conclusions as `assessment-hunt.md`, following
 the provenance and freshness requirements in the shared
 [synthesis contract](../../docs/reference/analysis-synthesis.md#caller-assessment-files).
@@ -52,7 +53,9 @@ Read [operating-contract.md](references/operating-contract.md), the shared [auth
 7. Do not manually spawn artifact or chunk agents; the CLI owns the globally bounded pool.
 8. Require validated line-oriented analyst results; models select source references
    and field names, while Python hydrates exact evidence values.
-9. Require validated final AI dispositions before publishing findings, even for one artifact/chunk.
+9. Publish supported findings only after final review: caller review with
+   `--synthesis none`, or validated harness dispositions with `--synthesis full`,
+   including one artifact/chunk.
 10. Export only on explicit request or evidential need, never to rescue analysis.
 11. Use skill contracts and documented `dfir --help`; do not inspect Python
     implementation to discover investigation workflow or CLI semantics.
@@ -310,7 +313,10 @@ See [report-contract.md](references/report-contract.md).
 ## Failure behavior
 - Stop if the configured read-only analyst runner is unavailable.
 - Mark failed collection or analysis tasks as coverage failures.
-- Retry an objectively unusable output once, then stop retrying that task.
+- Use the configured validation-correction budget (two extra attempts by default),
+  separately from transport retries. Stop when that budget is exhausted; follow
+  the shared [recovery contract](../../docs/reference/analysis-recovery.md)
+  to resume failed work without discarding accepted results.
 - Distinguish completed candidate analysis from final review. Claim a completed
   assessment only after required coverage and the harness or caller review validate.
 - Use `complete_with_failures` when defensible results exist with coverage loss.

@@ -15,6 +15,48 @@ The starting checkout had 392 Git-visible files, including non-ignored untracked
 files. Most imported content was uncommitted. Existing work and the sync baseline
 were preserved. Nonempty Git-visible files had no exact byte duplicates.
 
+
+## Cleanup follow-up, 2026-10-29
+
+Reviewed the current working tree using the upstream `AUDIT.md` low-value-code
+criteria. The structural pass covered root/package and CI files, agent/plugin
+metadata, configuration, docs, all eight skill directories, every runtime module
+group (agent, analyze, artifacts, autoruns, collect, common, hunt, logging,
+resources), tests and utilities. This is not an exhaustive semantic audit of
+every function. Existing uncommitted work was retained; no live APIs were used.
+
+- Test inventory: 1,937 test functions in 119 files before cleanup, with no exact
+  duplicate AST bodies. Similar test names alone did not justify removal.
+- Removed four layout tests: fixed skill inventory and package/Python-version
+  assertions duplicated declarations; SQLite integrity and excluded-PDF checks
+  already run in `validate-public-export.py`, which CI requires. Kept executable
+  entrypoint checks and named-profile/response-depth consistency checks.
+- Reduced setup matrices by 23 cases. Confirmation spellings still cover both
+  new/existing profiles; native source layouts and override precedence each remain
+  covered; integer failures retain zero, negative and nonnumeric cases. Token
+  minima retain both fields and all three API providers, while alias-specific
+  model caps remain in their dedicated tests. Context-budget arithmetic retains
+  all three output sizes and both symbolic input forms without their cross product.
+- Retained provisioning, credentials, evidence-integrity, recovery and usage tests.
+  Kept the standalone analyst utility: it has documented consumers and bounded
+  execution/output behavior, rather than being an unused forwarding wrapper.
+- Removed quadratic UTF-8 re-encoding from long-line report pagination. Three-run
+  median for a 2 MB line with a 700-byte body limit fell from 1.340081 s to
+  0.004945 s on this workstation; 2,858 pages and exact content were unchanged.
+  Existing publication tests now exercise two-, three- and four-byte characters.
+- Consolidated README reporting guidance and corrected the stale claim that
+  caller-only synthesis was the default.
+
+The same focused test selection fell from **196 to 169 passing cases** (0.88 s
+before, 0.60 s after; timings are indicative, not a benchmark guarantee). No test
+files or runtime entrypoints were removed. Sync mappings remain intact; these
+reviewed local adaptations must be preserved during future synchronization.
+
+Final validation: **254 focused tests passed**; blocking Ruff rules
+(`E9,F63,F7,F82`), public-export validation and `git diff --check` passed.
+The sync preview has no incoming changes or unresolved conflicts. The full suite
+was not rerun for this bounded cleanup.
+
 ## Recommendations
 
 1. Keep the runtime, all eight skills, policy assets, reviewed GoldenDB source

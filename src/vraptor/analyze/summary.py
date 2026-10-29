@@ -11,15 +11,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from vraptor.analyze import references as evidence_references
+from vraptor.analyze.reporting import current_policy
+from vraptor.analyze.report_priority import display_priority, priority_key, priority_metadata, rank_findings
 
 
-MAX_PRIMARY_FINDINGS = 20
-MAX_EXAMPLES_PER_FINDING = 3
-MAX_PREVIEW_CHARS = 320
 SUPPLEMENT_VALUE_CHARS = 600
-MAX_FULL_CONTEXT_CHARS = 2_000_000
-MAX_CHAT_SUMMARY_CHARS = 32_000
-MAX_TIMELINE_ROWS = 20
 
 
 def unique_limitations(values: Iterable[str]) -> list[str]:
@@ -109,7 +105,8 @@ def _visible_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _preview(value: Any, *, limit: int = MAX_PREVIEW_CHARS) -> str:
+def _preview(value: Any, *, limit: int | None = None) -> str:
+    limit = current_policy().preview_chars if limit is None else limit
     text = str(value).replace("\r", " ").replace("\n", " ").strip()
     text = re.sub(r"\s+", " ", text)
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
@@ -193,11 +190,12 @@ def grouped_sources(evidence_rows: Iterable[Mapping[str, Any]]) -> list[dict[str
 def representative_examples(
     evidence_rows: Iterable[Mapping[str, Any]],
     *,
-    limit: int = MAX_EXAMPLES_PER_FINDING,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
+    limit = current_policy().examples_per_finding if limit is None else limit
     examples: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw in evidence_rows:
+    for raw in sorted(evidence_rows, key=_canonical):
         evidence = dict(raw)
         fields = _visible_fields(dict(evidence.get("fields") or {}))
         if not fields:
@@ -223,9 +221,9 @@ def representative_examples(
     return examples
 
 
-def preview_fields(fields: Mapping[str, Any]) -> dict[str, str]:
+def preview_fields(fields: Mapping[str, Any], *, limit: int | None = None) -> dict[str, str]:
     return {
-        name: _preview(value)
+        name: _preview(value, limit=limit)
         for name, value in _visible_fields(fields).items()
     }
 
@@ -239,7 +237,8 @@ def compact_result(
     payload = copy.deepcopy(dict(result))
     payload["limitations"] = unique_limitations(payload.get("limitations") or [])
     compact_findings: list[dict[str, Any]] = []
-    all_findings = list(payload.get("findings") or [])
+    policy = current_policy()
+    all_findings = rank_findings(payload.get("findings") or [])
     declared_finding_count = (
         len(all_findings)
         if payload.get("final_review")
@@ -251,6 +250,7 @@ def compact_result(
         compact_findings.append(
             {
                 "id": str(finding.get("id") or ""),
+                **priority_metadata(finding),
                 "confidence": str(finding.get("confidence") or "unknown"),
                 "domains": list(finding.get("domains") or []),
                 "summary": str(finding.get("summary") or ""),
@@ -264,24 +264,31 @@ def compact_result(
                     if has_source_evidence
                     else copy.deepcopy(list(finding.get("sources") or []))
                 ),
+                "example_coverage": (
+                    "selected_source_rows" if has_source_evidence else
+                    str(finding.get("example_coverage") or ("retained_examples_only" if finding.get("examples") else "unavailable"))
+                ),
+                "available_example_count": (
+                    len({_canonical(_visible_fields(dict(item.get("fields") or {}))) for item in evidence if _visible_fields(dict(item.get("fields") or {}))})
+                    if has_source_evidence else int(finding.get("available_example_count", len(finding.get("examples") or [])))
+                ),
                 "examples": (
                     representative_examples(evidence)
-                    if has_source_evidence and index < MAX_PRIMARY_FINDINGS
-                    else copy.deepcopy(list(finding.get("examples") or []))[
-                        :MAX_EXAMPLES_PER_FINDING
+                    if has_source_evidence
+                    else [
+                        {**copy.deepcopy(example), "fields": preview_fields(example.get("fields") or {})}
+                        for example in list(finding.get("examples") or [])[:policy.examples_per_finding]
                     ]
-                    if index < MAX_PRIMARY_FINDINGS
-                    else []
                 ),
             }
         )
     payload["findings"] = compact_findings
     payload["finding_count"] = declared_finding_count
     payload["primary_finding_count"] = min(
-        len(compact_findings), MAX_PRIMARY_FINDINGS
+        len(compact_findings), policy.detailed_findings
     )
     payload["indexed_finding_count"] = max(
-        0, len(compact_findings) - MAX_PRIMARY_FINDINGS
+        0, len(compact_findings) - policy.detailed_findings
     )
     payload["findings_omitted_from_summary"] = max(
         0, declared_finding_count - len(compact_findings)
@@ -302,8 +309,26 @@ def compact_result(
         }
         if isinstance(item, Mapping)
         else str(item)
-        for item in list(payload.get("relevant_context") or [])[:10]
+        for item in prioritized_context(payload.get("relevant_context") or [], all_findings)
     ]
+    by_priority: dict[str, dict[str, int]] = {}
+    for index, finding in enumerate(compact_findings):
+        group = by_priority.setdefault(finding["report_priority"], {
+            "total": 0, "detailed": 0, "indexed": 0, "omitted_examples": 0,
+        })
+        detailed = index < policy.detailed_findings
+        group["total"] += 1
+        group["detailed" if detailed else "indexed"] += 1
+        available = finding["available_example_count"]
+        group["omitted_examples"] += max(0, available - (len(finding["examples"]) if detailed else 0))
+    payload["reporting"] = {
+        "total_findings": len(compact_findings),
+        "detailed_findings": payload["primary_finding_count"],
+        "indexed_findings": payload["indexed_finding_count"],
+        "omitted_examples": sum(item["omitted_examples"] for item in by_priority.values()),
+        "priority_counts": by_priority,
+        "context_omitted": max(0, len(result.get("relevant_context") or []) - policy.context_items),
+    }
     if "investigative_leads" in payload:
         leads = list(payload["investigative_leads"] or [])
         payload["investigative_lead_count"] = len({item["candidate_id"] for item in leads})
@@ -318,6 +343,16 @@ def compact_result(
         payload["artifact_reports"] = dict(sorted(artifact_reports.items()))
     payload["evidence_persisted"] = False
     return payload
+
+
+def prioritized_context(items: Iterable[Any], findings: Iterable[Mapping[str, Any]]) -> list[Any]:
+    """Rank finding-linked context without assigning an inferred severity."""
+    by_id = {str(item.get("id") or ""): item for item in findings}
+    return sorted(items, key=lambda item: (
+        priority_key(by_id.get(str(item.get("finding_id") or ""), item))
+        if isinstance(item, Mapping) else priority_key({}),
+        _canonical(item),
+    ))
 
 
 def source_group_text(group: Mapping[str, Any]) -> str:
@@ -339,14 +374,8 @@ def source_group_text(group: Mapping[str, Any]) -> str:
     return " / ".join(components)
 
 
-def render_compact_findings(result: Mapping[str, Any]) -> list[str]:
-    raw_findings = list(result.get("findings") or [])
-    summary = (
-        dict(result)
-        if raw_findings
-        and all("sources" in finding and "examples" in finding for finding in raw_findings)
-        else compact_result(result)
-    )
+def render_compact_findings(result: Mapping[str, Any], *, _compacted: bool = False) -> list[str]:
+    summary = result if _compacted else compact_result(result)
     findings = list(summary.get("findings") or [])
     if not findings:
         if result.get("review_status") == "not_requested":
@@ -358,7 +387,7 @@ def render_compact_findings(result: Mapping[str, Any]) -> list[str]:
         len(findings),
         max(
             0,
-            int(summary.get("primary_finding_count") or MAX_PRIMARY_FINDINGS),
+            int(summary.get("primary_finding_count", current_policy().detailed_findings)),
         ),
     )
     lines: list[str] = []
@@ -369,6 +398,7 @@ def render_compact_findings(result: Mapping[str, Any]) -> list[str]:
                 f"### {finding_id}: {finding.get('summary', '')}",
                 "",
                 f"- Confidence: `{finding.get('confidence', 'unknown')}`",
+                f"- Report priority: `{display_priority(finding)}`",
                 "- ATT&CK tactics: "
                 + (", ".join(finding.get("domains") or []) or "not specified"),
                 f"- Selected supporting rows: {int(finding.get('occurrence_count') or 0)}",
@@ -395,7 +425,7 @@ def render_compact_findings(result: Mapping[str, Any]) -> list[str]:
             finding_summary = _preview(str(finding.get("summary") or ""))
             occurrence_count = int(finding.get("occurrence_count") or 0)
             lines.append(
-                f"- `{finding_id}` [{confidence}] {finding_summary} "
+                f"- `{finding_id}` [{display_priority(finding)}; confidence={confidence}] {finding_summary} "
                 f"(selected supporting rows: {occurrence_count})"
             )
         lines.append("")
@@ -424,11 +454,11 @@ def render_final_review(
     leads = list(result.get("investigative_leads") or [])
     if leads:
         lines.extend(["", "### Unresolved investigative leads", ""])
-        for item in leads[:10] if compact else leads:
+        for item in rank_findings(leads)[:current_policy().context_items] if compact else rank_findings(leads):
             text = _preview(item.get("summary")) if compact else item.get("summary")
             lines.append(f"- `{item.get('candidate_id')}` `{item.get('ref')}`: {text}")
-        if compact and len(leads) > 10:
-            lines.append(f"- {len(leads) - 10} additional source-linked lead entries in the report.")
+        if compact and len(leads) > current_policy().context_items:
+            lines.append(f"- {len(leads) - current_policy().context_items} additional source-linked lead entries in the report.")
     if review.get("dispositions"):
         lines.extend(["", "### Candidate dispositions", ""])
         if compact:
@@ -442,14 +472,23 @@ def render_final_review(
     return lines
 
 
-def render_relevant_context(result: Mapping[str, Any]) -> list[str]:
+def render_follow_up(result: Mapping[str, Any]) -> list[str]:
+    values = [str(value).strip() for value in result.get("bounded_follow_up") or [] if str(value).strip()]
+    limit = current_policy().follow_up_actions
+    lines = [f"- {value}" for value in values[:limit]]
+    if len(values) > limit:
+        lines.append(f"- {len(values) - limit} additional action(s) retained in the structured result.")
+    return lines or ["- No bounded follow-up was returned."]
+
+
+def render_relevant_context(result: Mapping[str, Any], *, _compacted: bool = False) -> list[str]:
     """Render bounded context with its finding and semantic relationship."""
-    summary = compact_result(result)
+    summary = result if _compacted else compact_result(result)
     items = list(summary.get("relevant_context") or [])
     if not items:
         return ["No additional finding-linked context was retained."]
     lines: list[str] = []
-    for raw in items[:10]:
+    for raw in items[:current_policy().context_items]:
         if not isinstance(raw, Mapping):
             lines.append(f"- {raw}")
             continue
@@ -568,7 +607,7 @@ def render_utc_timeline(
     result: Mapping[str, Any],
     *,
     default_host: str = "",
-    limit: int = MAX_TIMELINE_ROWS,
+    limit: int | None = None,
 ) -> list[str]:
     """Render a bounded evidence-linked timeline from time-bearing examples.
 
@@ -577,6 +616,8 @@ def render_utc_timeline(
     """
     summary = compact_result(result)
     rows: list[tuple[str, str, str, str, str, str, str]] = []
+    row_priorities: dict[tuple, tuple] = {}
+    findings_by_id = {str(item.get("id") or ""): item for item in summary.get("findings") or []}
     confidence_by_finding: dict[str, str] = {}
     for finding in summary.get("findings") or []:
         if not isinstance(finding, Mapping):
@@ -598,6 +639,7 @@ def render_utc_timeline(
             )
             if row:
                 rows.append(row)
+                row_priorities[row] = min(row_priorities.get(row, priority_key(finding)), priority_key(finding))
     for context in summary.get("relevant_context") or []:
         if not isinstance(context, Mapping):
             continue
@@ -614,7 +656,9 @@ def render_utc_timeline(
         )
         if row:
             rows.append(row)
-    unique_rows = sorted(set(rows), key=lambda row: row)
+            ranking = priority_key(findings_by_id.get(finding_id, context))
+            row_priorities[row] = min(row_priorities.get(row, ranking), ranking)
+    unique_rows = sorted(set(rows), key=lambda row: (row_priorities[row], row))
     if not unique_rows:
         return [
             "No unambiguous time-bearing material entries were retained in the "
@@ -625,10 +669,10 @@ def render_utc_timeline(
         "| Timestamp (UTC) | Host | User/session | Process/action | Evidence source | Interpretation | Confidence |",
         "|---|---|---|---|---|---|---|",
     ]
-    effective_limit = max(1, int(limit))
+    effective_limit = current_policy().timeline_rows if limit is None else max(1, int(limit))
     lines.extend(
         "| " + " | ".join(_timeline_cell(value) for value in row) + " |"
-        for row in unique_rows[:effective_limit]
+        for row in sorted(unique_rows[:effective_limit])
     )
     if len(unique_rows) > effective_limit:
         lines.append(
@@ -699,7 +743,7 @@ def render_chat_summary(
     collection_complete: bool | None = None,
 ) -> str:
     """Render the bounded Markdown contract that callers surface to chat."""
-    payload = dict(result)
+    payload = compact_result(result)
     effective_coverage = dict(coverage or payload.get("coverage") or {})
     effective_status = str(status or payload.get("status") or "unknown")
     lines = [f"## {title}", "", f"- Status: `{effective_status}`"]
@@ -739,11 +783,11 @@ def render_chat_summary(
             "",
             "### Preliminary candidates" if payload.get("review_status") == "not_requested" else "### Findings",
             "",
-            *render_compact_findings(payload),
+            *render_compact_findings(payload, _compacted=True),
             "",
             "### Relevant context",
             "",
-            *render_relevant_context(payload),
+            *render_relevant_context(payload, _compacted=True),
             *render_final_review(payload, compact=True),
             "",
             "### Limitations",
@@ -759,32 +803,144 @@ def render_chat_summary(
     if not limitations:
         lines.append("- None identified.")
     lines.extend(["", "### Next action", ""])
-    follow_up = [
-        str(value).strip()
-        for value in payload.get("bounded_follow_up") or []
-        if str(value).strip()
-    ]
-    lines.extend(f"- {value}" for value in follow_up)
-    if not follow_up:
-        lines.append("- No bounded follow-up was returned.")
+    lines.extend(render_follow_up(payload))
     rendered = "\n".join(lines).rstrip() + "\n"
-    if len(rendered) <= MAX_CHAT_SUMMARY_CHARS:
-        return rendered
-    suffix = (
-        "\n\nChat summary reached its 32,000-character guard; consult the "
-        "linked analysis report for remaining detail.\n"
-    )
-    clipped = rendered[
-        : MAX_CHAT_SUMMARY_CHARS - len(suffix)
-    ].rsplit("\n", 1)[0].rstrip()
-    return clipped + suffix
+    return bound_chat_markdown(rendered)
 
+
+def bound_chat_markdown(rendered: str, *, limit: int | None = None) -> str:
+    """Reserve coverage, caveats and a concise urgent-finding inventory on overflow.
+
+    No accepted finding is removed from the structured result or full report.
+    The fallback explicitly counts shortened caveats and undisplayed priority
+    entries, rather than silently dropping the tail of the Markdown document.
+    """
+    limit = current_policy().chat_chars if limit is None else limit
+    if len(rendered) <= limit:
+        return rendered
+    blocks = [block for block in re.split(r"(?=^#{2,4} )", rendered, flags=re.M) if block.strip()]
+    inventory: dict[str, tuple[str, str]] = {}
+    caveats: list[str] = []
+    statuses: list[str] = []
+    links = list(dict.fromkeys(re.findall(r"\[[^\]\n]+\]\([^\)\n]+\)", rendered)))
+    for block in blocks:
+        lines = block.splitlines()
+        heading = lines[0].casefold()
+        if "limitations" in heading:
+            caveats.extend(line.removeprefix("- ").strip() for line in lines[1:] if line.strip())
+        statuses.extend(line for line in lines if line.startswith((
+            "- Status:", "- Collection:", "- Analysis:", "- Result review:",
+            "- Target execution:", "- Overall coverage:", "- Failure", "- Failed ",
+        )))
+        matched = re.search(r"^- Report priority: `(critical|high|medium|low|informational|unranked|Not assessed)`", block, flags=re.M)
+        if matched:
+            entry = re.match(r"^#{2,4} ([^:\n]+):\s*(.*)", lines[0])
+            if entry:
+                inventory[entry[1]] = (matched[1], entry[2])
+            else:
+                identity = "entry-" + hashlib.sha256(lines[0].encode()).hexdigest()[:8]
+                inventory[identity] = (matched[1], " ".join(line for line in lines[:4] if line.strip()))
+        for line in lines:
+            indexed = re.match(r"^- `([^`]+)` \[(critical|high|medium|low|informational|unranked|Not assessed);[^\]]*\] (.*)", line)
+            if indexed:
+                inventory[indexed[1]] = (indexed[2], indexed[3])
+            specialized = re.match(r"^- (?:Indexed )?\[(critical|high|medium|low|informational|unranked|Not assessed)\]:? (.*)", line)
+            if specialized:
+                identity = "entry-" + hashlib.sha256(specialized[2].encode()).hexdigest()[:8]
+                inventory[identity] = (specialized[1], specialized[2])
+            autoruns = re.match(r"^- (CRITICAL|HIGH|MEDIUM|LOW) \| (.*)", line)
+            if autoruns:
+                identity = "entry-" + hashlib.sha256(autoruns[2].encode()).hexdigest()[:8]
+                inventory[identity] = (autoruns[1].lower(), autoruns[2])
+    ordered_all = sorted(inventory.items(), key=lambda item: priority_key({
+        "id": item[0], "report_priority": item[1][0],
+    }))
+    ordered = [item for item in ordered_all if item[1][0] in {"critical", "high"}]
+    lower = [item for item in ordered_all if item[1][0] not in {"critical", "high"}]
+    notice = (f"\nSummary shortened at the {limit:,}-character guard. "
+              "All findings and full caveats remain in the complete analysis report and structured result.\n")
+    if links and len(links[0]) <= min(limit // 4, 300):
+        notice += "Report: " + links[0] + "\n"
+    # Reserve explicit accounting even for pathological numbers of protected items.
+    reserved = len(notice) + 160
+    if reserved >= limit:
+        return notice.strip()[:limit]
+    budget = limit - reserved
+    header = blocks[0].splitlines()[0] if blocks else "## Analysis summary"
+    statuses = list(dict.fromkeys(statuses))
+    prefix = header + "\n" + "\n".join(statuses) + "\n"
+    if len(prefix) > budget // 3:
+        prefix = header[:100] + "\n" + "\n".join(statuses[:2]) + "\n"
+    if len(prefix) > budget // 3:
+        prefix = prefix[:max(0, budget // 3 - 40)] + "\n[Additional status in full report.]\n"
+    budget -= len(prefix)
+    chosen_caveats: list[str] = []
+    shortened_caveats = 0
+    omitted_caveats = 0
+    caveat_budget = budget // 2 if ordered else budget
+    caveat_width = max(20, caveat_budget // max(1, len(caveats)) - 3)
+    for value in caveats:
+        line = "- " + _preview(value, limit=caveat_width) + "\n"
+        if len(line) <= caveat_budget:
+            chosen_caveats.append(line)
+            caveat_budget -= len(line)
+            shortened_caveats += len(value) > caveat_width
+        else:
+            omitted_caveats += 1
+    caveat_text = "### Limitations\n" + "".join(chosen_caveats) if caveats else ""
+    budget -= len(caveat_text)
+    priority_text = "### Priority findings\n" if ordered else ""
+    budget -= len(priority_text)
+    omitted_priority = {"critical": 0, "high": 0}
+    width = max(0, budget // max(1, len(ordered)) - 24)
+    for identity, (priority, value) in ordered:
+        preview = _preview(value, limit=width) if width >= 4 else ""
+        line = f"- [{display_priority({'report_priority': priority})}] {identity}" + (": " + preview if preview else "") + "\n"
+        if len(line) <= budget:
+            priority_text += line
+            budget -= len(line)
+        else:
+            omitted_priority[priority] += 1
+    other_text = ""
+    for heading in ("### Assessment", "### Next action"):
+        matches = [block for block in blocks if block.startswith(heading + "\n")]
+        if not matches or budget < len(heading) + 40:
+            continue
+        content = " ".join(matches[0].splitlines()[1:]).strip()
+        width = min(512, max(20, budget // 8))
+        section = heading + "\n" + _preview(content, limit=width) + "\n"
+        if len(section) <= budget:
+            other_text += section
+            budget -= len(section)
+    omitted_lower: dict[str, int] = {}
+    if lower and budget > 30:
+        other_text += "### Additional findings\n"
+        budget -= len("### Additional findings\n")
+    for identity, (priority, value) in lower:
+        line = f"- [{display_priority({'report_priority': priority})}] {identity}: " + _preview(value, limit=min(current_policy().preview_chars, 160)) + "\n"
+        if len(line) <= budget:
+            other_text += line
+            budget -= len(line)
+        else:
+            omitted_lower[priority] = omitted_lower.get(priority, 0) + 1
+    lower_notice = ""
+    if omitted_lower:
+        lower_notice = "Unshown other entries: " + ", ".join(f"{count} {display_priority({'report_priority': priority})}" for priority, count in omitted_lower.items()) + ".\n"
+    accounting = (f"Shortened limitations: {shortened_caveats}; unshown limitations: {omitted_caveats}. "
+                  f"Unshown priority entries: {omitted_priority['critical']} critical, {omitted_priority['high']} high.\n")
+    answer = prefix + caveat_text + priority_text + other_text + accounting + lower_notice + notice
+    # The reserve covers accounting; shrinking only the notice is a final guard
+    # for unexpectedly long decimal counters, not finding/caveat truncation.
+    if len(answer) > limit:
+        answer = prefix + caveat_text + priority_text + other_text + accounting + lower_notice
+        return answer + notice[:max(0, limit - len(answer))]
+    return answer
 
 def _full_evidence_groups(
     findings: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     groups: dict[tuple[str, str], dict[str, Any]] = {}
-    for finding in findings:
+    for finding in rank_findings(findings):
         finding_id = str(finding.get("id") or "Finding")
         for raw in finding.get("evidence") or []:
             evidence = dict(raw)
@@ -818,26 +974,20 @@ def _result_full_evidence_groups(
         for item in result.get("findings") or []
         if isinstance(item, Mapping)
     ]
-    context_evidence = []
+    by_id = {str(item.get("id") or ""): item for item in findings}
     for raw in [*(result.get("relevant_context") or []), *(result.get("investigative_leads") or [])]:
         if not isinstance(raw, Mapping) or not raw.get("_full_fields"):
             continue
-        context_evidence.append(
-            {
-                "artifact": raw.get("artifact"),
-                "ref": raw.get("ref"),
-                "source": raw.get("source"),
-                "fields": raw.get("fields"),
+        finding = by_id.get(str(raw.get("finding_id") or ""), raw)
+        findings.append({
+            "id": raw.get("finding_id") or raw.get("candidate_id") or "Selected review context",
+            **priority_metadata(finding),
+            "evidence": [{
+                "artifact": raw.get("artifact"), "ref": raw.get("ref"),
+                "source": raw.get("source"), "fields": raw.get("fields"),
                 "_full_fields": raw.get("_full_fields"),
-            }
-        )
-    if context_evidence:
-        findings.append(
-            {
-                "id": "Selected review context",
-                "evidence": context_evidence,
-            }
-        )
+            }],
+        })
     return _full_evidence_groups(findings)
 
 
@@ -853,7 +1003,7 @@ def _render_full_groups(groups: Iterable[Mapping[str, Any]]) -> list[str]:
             indent=2,
             default=str,
         )
-        if used_chars + len(field_json) > MAX_FULL_CONTEXT_CHARS:
+        if used_chars + len(field_json) > current_policy().evidence_chars:
             omitted += 1
             continue
         retained += 1
@@ -873,7 +1023,7 @@ def _render_full_groups(groups: Iterable[Mapping[str, Any]]) -> list[str]:
         lines.extend(
             [
                 f"{omitted} additional selected full-row group(s) exceeded the "
-                "2,000,000-character report guard and remain authoritative in "
+                f"{current_policy().evidence_chars:,}-character report guard and remain authoritative in "
                 "Velociraptor.",
                 "",
             ]
@@ -942,6 +1092,7 @@ def render_time_filter_provenance(value: Mapping[str, Any] | None) -> list[str]:
 
 
 def render_artifact_report(result: Mapping[str, Any]) -> str:
+    display = compact_result(result)
     artifact = str(result.get("artifact") or "unknown")
     coverage = dict(result.get("coverage") or {})
     lines = [
@@ -950,7 +1101,6 @@ def render_artifact_report(result: Mapping[str, Any]) -> str:
         f"- Review status: `{result.get('status', 'unknown')}`",
         f"- Review coverage: {int(coverage.get('reviewed_rows') or 0)}/{int(coverage.get('planned_rows') or 0)} exposed rows",
         f"- Collection coverage: `{dict(result.get('collection_coverage') or {}).get('status', 'not_assessed')}`; flow `{dict(result.get('collection_coverage') or {}).get('flow_state', 'UNKNOWN')}`",
-        "- Velociraptor source of truth: yes",
         "- Rows sharing manager-selected fields use one full projected representative.",
         f"- Analysis time filter: `{coverage.get('time_filter', 'not_requested')}`",
         "",
@@ -968,11 +1118,11 @@ def render_artifact_report(result: Mapping[str, Any]) -> str:
         "## Preliminary candidates — caller review required"
         if result.get("result_role") in {"provisional_candidates", "preliminary_candidates"} else "## Findings",
         "",
-        *render_compact_findings(result),
+        *render_compact_findings(display, _compacted=True),
         "",
         "## Relevant context",
         "",
-        *render_relevant_context(result),
+        *render_relevant_context(display, _compacted=True),
         *render_final_review(result),
         "",
         "## Selected full evidence",
@@ -985,8 +1135,8 @@ def render_artifact_report(result: Mapping[str, Any]) -> str:
     for heading, key in (("Limitations", "limitations"), ("Bounded follow-up", "bounded_follow_up")):
         lines.extend([f"## {heading}", ""])
         values = unique_limitations(result.get(key) or []) if key == "limitations" else list(result.get(key) or [])
-        lines.extend(f"- {value}" for value in values)
-        if not values:
+        lines.extend(render_follow_up(result) if key == "bounded_follow_up" else [f"- {value}" for value in values])
+        if not values and key != "bounded_follow_up":
             lines.append("- None.")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -1039,6 +1189,8 @@ def consolidate_exact_findings(
             grouped[key]["evidence"] = []
             order.append(key)
         target = grouped[key]
+        if priority_key(finding) < priority_key(target):
+            target.update(priority_metadata(finding))
         seen = {
             _canonical(
                 {
@@ -1064,7 +1216,7 @@ def consolidate_exact_findings(
             if identity not in seen:
                 target["evidence"].append(copy.deepcopy(evidence))
                 seen.add(identity)
-    consolidated = [grouped[key] for key in order]
+    consolidated = rank_findings(grouped[key] for key in order)
     for index, finding in enumerate(consolidated, start=1):
         finding["id"] = f"{id_prefix}{index}"
     return consolidated

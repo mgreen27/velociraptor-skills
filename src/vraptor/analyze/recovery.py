@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from vraptor.analyze import report_priority
 from vraptor.common import atomic_io
 
 VALIDATION_MESSAGES = frozenset(
@@ -85,6 +86,19 @@ def worker_text(worker: dict) -> str:
         lines.extend(
             f"EVIDENCE\t{finding['id']}\t{row['ref']}" for row in finding["rows"]
         )
+        priority = report_priority.priority_metadata(finding)
+        if priority["priority_rationale"]:
+            lines.append(
+                f"PRIORITY\t{finding['id']}\t{priority['report_priority']}\t"
+                + priority["priority_rationale"]
+            )
+        elif priority["report_priority"] != "unranked":
+            # Old saved explicit labels may lack a rationale. Preserve the label
+            # without inventing an impact assessment during revalidation.
+            lines.append(
+                f"PRIORITY\t{finding['id']}\t{priority['report_priority']}\t"
+                "Retained saved priority; original rationale unavailable."
+            )
     for row in worker.get("relevant_context", []):
         lines.append(
             "\t".join(
@@ -143,13 +157,46 @@ class ChunkRecovery:
         atomic_io.write_json_atomic(self.path, self.payload, sort_keys=True)
 
 
+def _safe_diagnostic_value(key: str, value: Any) -> bool:
+    """Retain protocol vocabulary and references, never arbitrary model identifiers."""
+    from vraptor.analyze.host import ATTACK_TACTICS
+
+    if key == "line":
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    if not isinstance(value, str) or len(value) > 100:
+        return False
+    if key in {"code", "reason"}:
+        return re.fullmatch(r"[a-z][a-z0-9_]{0,99}", value) is not None
+    records = {
+        "RESULT", "FINDING", "FINDINGS", "PRIORITY", "EVIDENCE", "CONTEXT",
+        "RELEVANT_CONTEXT", "LIMITATION", "LIMITATIONS", "FOLLOW_UP", "UPLIFT",
+        "DISPOSITION", "DISPOSITIONS", "ANSWER", "TEXT", "END",
+    }
+    if key == "record":
+        return value in records
+    if key == "ref":
+        return re.fullmatch(r"S[0-9]{1,20}-R[0-9]{1,20}", value) is not None
+    identifier = re.fullmatch(r"(?:A[0-9]{1,20}:)?[FM][0-9]{1,20}", value)
+    if key in {"finding_id", "candidate_id"}:
+        return identifier is not None
+    return bool(
+        identifier
+        or re.fullmatch(r"S[0-9]{1,20}-R[0-9]{1,20}", value)
+        or value in records
+        or value in ATTACK_TACTICS
+        or value in report_priority.RETAINED_PRIORITIES
+    )
+
+
 def task_diagnostics(record: dict) -> dict:
     """No provider bodies, model text, source values, or arbitrary error messages."""
     attempts = []
-    for item in record.get("attempt_history", []):
+    history = list(record.get("attempt_history", []))
+    for item in history[:7]:
         run = item.get("run") or {}
         defects = []
-        for raw in item.get("diagnostics") or []:
+        raw_defects = list(item.get("diagnostics") or [])
+        for raw in raw_defects[:50]:
             defect = {}
             if raw.get("message") in VALIDATION_MESSAGES:
                 defect["message"] = raw["message"]
@@ -161,22 +208,16 @@ def task_diagnostics(record: dict) -> dict:
                 "finding_id",
                 "line",
                 "allowed",
-                "received", "reason",
+                "received", "missing", "reason",
             ):
                 value = raw.get(key)
-                if (
-                    isinstance(value, int)
-                    and not isinstance(value, bool)
-                    or isinstance(value, str)
-                    and re.fullmatch(r"[A-Za-z0-9_. :+-]{1,100}", value)
-                ):
+                if _safe_diagnostic_value(key, value):
                     defect[key] = value
-                elif key in {"allowed", "received"} and isinstance(value, list):
+                elif key in {"allowed", "received", "missing"} and isinstance(value, list):
                     defect[key] = [
                         v
                         for v in value[:50]
-                        if isinstance(v, str)
-                        and re.fullmatch(r"[A-Za-z0-9_. :+-]{1,100}", v)
+                        if _safe_diagnostic_value(key, v)
                     ]
             if defect:
                 defects.append(defect)
@@ -210,11 +251,12 @@ def task_diagnostics(record: dict) -> dict:
                     category,
                     "Inspect provider status and configured capabilities. Use metadata-only --debug for further detail.",
                 ),
-                "provider_attempts": run.get("attempts", 0),
+                "provider_attempts": run.get("attempt_count", run.get("attempts", 0)),
                 "elapsed_seconds": run.get("elapsed_seconds", 0),
                 "response_sha256": hashlib.sha256(
                     str(run.get("output") or "").encode()
                 ).hexdigest(),
+                **({"omitted_defect_count": len(raw_defects) - 50} if len(raw_defects) > 50 else {}),
             }
         )
     return {
@@ -224,6 +266,7 @@ def task_diagnostics(record: dict) -> dict:
         "attempts": record.get("attempts", 0),
         "coverage": record.get("coverage", {}),
         "attempt_history": attempts,
+        **({"omitted_attempt_count": len(history) - 7} if len(history) > 7 else {}),
         "action": (
             "Correct the cited validation defects or check provider configuration; then use --retry-failed with the same request and question."
             if record.get("status") == "failed"

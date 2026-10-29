@@ -38,7 +38,7 @@ collection state. It reviews exposed results from RUNNING or STOPPED hunts.
 
    ```bash
    vraptor analyze --hunt H.EXAMPLE --id IR1234 --case-root ~/cases \
-     --server-profile lab --synthesis none
+     --server-profile lab
    ```
 
    Omit `--artifact` to review the hunt's declared artifacts. Preserve requested
@@ -79,8 +79,9 @@ instructions and offline-only work retain their scope.
 
 Existing-evidence analysis uses `vraptor analyze`; collection, retries and
 GoldenDB uploads remain explicit. See the [shared CLI contract](../../docs/contracts/cli.md).
-`--synthesis none` is the default: classification runs and the caller reviews its
-preliminary candidates. Use `--synthesis full` only for requested harness synthesis;
+`--synthesis full` is the default. Add `--synthesis none` only when preliminary-only
+analysis or caller-only final review is requested; classification still runs and
+the caller reviews its candidates. `--skip-ai` disables all model calls;
 see the [synthesis contract](../../docs/reference/analysis-synthesis.md)
 for saved-summary execution and specialized-path limits.
 

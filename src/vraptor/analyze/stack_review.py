@@ -13,14 +13,16 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from vraptor.analyze import limits as analysis_limits
 from vraptor.agent import runtime as agent_runtime
-from vraptor.common import token_budget
-from vraptor.agent.config import DEFAULT_ANALYST_AGENT_MAX_CONCURRENCY
-from vraptor.agent.config import ResolvedAgentExecution
+from vraptor.agent.config import (
+    DEFAULT_ANALYST_AGENT_MAX_CONCURRENCY,
+    ResolvedAgentExecution,
+)
+from vraptor.analyze import limits as analysis_limits
 from vraptor.analyze import line_protocol as analyst_line_protocol
+from vraptor.analyze import report_priority
 from vraptor.autoruns import ai_review as autoruns_ai_review
-
+from vraptor.common import token_budget
 
 SCHEMA_VERSION = 2
 DEFAULT_MAX_FLAGGED_GROUPS = 100
@@ -60,7 +62,6 @@ FOLLOWUP_FIELDS = (
     "RowsExhaustive",
     "SourceRows",
 )
-SEVERITIES = {"critical", "high", "medium", "low", "info"}
 DISPOSITIONS = {"notable", "suspicious"}
 SAFE_FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_. -]{0,127}$")
 TIME_FIELD_RE = re.compile(
@@ -864,7 +865,10 @@ Return a row only when the visible aggregate warrants follow-up:
 Omit clearly expected groups. A hash or opaque identifier without explanatory
 context is notable, not expected. Use only RowId values from this part. Give
 each returned row one disposition, severity, and a concrete reason under 240
-characters. After checking every row, return only:
+characters.
+{autoruns_ai_review._priority_guidance(expected_context=False)}
+This protocol has no confidence column; express uncertainty in the reason without
+using severity to represent certainty. After checking every row, return only:
 FLAG<TAB>RowId<TAB>disposition<TAB>severity<TAB>reason
 Omit expected rows and finish with END. Do not return JSON, Markdown, review
 accounting, or narrative.
@@ -913,7 +917,7 @@ def _validate(
             raise GenericStackReviewError(
                 f"Generic stack RowId {row_id} has invalid disposition."
             )
-        if severity not in SEVERITIES:
+        if severity not in report_priority.PRIORITIES:
             raise GenericStackReviewError(
                 f"Generic stack RowId {row_id} has invalid severity."
             )
@@ -1191,7 +1195,10 @@ is not inherently malicious. Preserve uncertainty when RowsExhaustive=false.
 Return exactly one assessment for every GroupId. Use suspicious only for
 concrete malicious or strongly security-relevant behavior; otherwise use
 notable when analyst validation is still warranted. Give a concise summary and
-reason, each under 300 characters. After reviewing every group, return exactly
+reason, each under 300 characters.
+{autoruns_ai_review._priority_guidance(expected_context=False)}
+This protocol has no confidence column; express uncertainty in the reason without
+using severity to represent certainty. After reviewing every group, return exactly
 one record per GroupId:
 ASSESSMENT<TAB>GroupId<TAB>disposition<TAB>severity<TAB>summary<TAB>reason
 Finish with END. Do not return JSON, Markdown, review accounting, or narrative.
@@ -1232,7 +1239,7 @@ def _validate_followup(
         severity = fields[3].strip().casefold()
         summary = fields[4].strip()
         reason = fields[5].strip()
-        if disposition not in DISPOSITIONS or severity not in SEVERITIES:
+        if disposition not in DISPOSITIONS or severity not in report_priority.PRIORITIES:
             raise GenericStackReviewError(
                 f"Generic stack follow-up GroupId {group_id} has invalid classification."
             )

@@ -60,12 +60,25 @@ def cached_result(cache: Mapping, key: str) -> dict | None:
     return None
 
 
-def cache_record(result: Mapping, key: str) -> dict:
-    return {
+def source_fingerprint(results: Sequence[Mapping], *, question: str, scope: str, plan: Mapping | None = None) -> str:
+    """Bind a derived review to accepted inputs independently of model settings."""
+    semantics = plan or {}
+    return fingerprint({"version": 1, "results": results, "question": question, "scope": scope,
+                        "plan": {key: semantics.get(key) for key in (
+                            "task_mode", "response_depth", "analysis_profile", "analysis_objectives",
+                            "time_filter", "collection_failures", "artifacts",
+                        )}})
+
+
+def cache_record(result: Mapping, key: str, *, source_identity: str = "") -> dict:
+    record = {
         "input_fingerprint": key,
         "result_fingerprint": fingerprint(result),
         "result": copy.deepcopy(dict(result)),
     }
+    if source_identity:
+        record["source_fingerprint"] = source_identity
+    return record
 
 
 def mode(value: str = "full") -> str:

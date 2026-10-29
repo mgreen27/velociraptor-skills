@@ -170,9 +170,9 @@ def test_command_override_does_not_contaminate_other_cached_connections(workstat
     assert snapshot.value("api_client", "two") == str(home / "two.yaml")
     other = snapshot.select("two")
     assert other.values["api_client"] == str(home / "two.yaml")
-    assert other.values["api_user"] == "vraptor"
+    assert "api_user" not in other.values
     assert "api_client" not in snapshot.select("unknown").values
-    assert other.environment["VELO_REMOTE_API_USER"] == "vraptor"
+    assert "VELO_REMOTE_API_USER" not in other.environment
 
 
 def test_unselected_command_override_applies_only_when_explicitly_passed_to_selected_profile(workstation):
@@ -515,7 +515,7 @@ def test_configure_preserves_saved_api_user(workstation, monkeypatch, capsys, se
 
 
 @pytest.mark.parametrize("interactive", [False, True])
-def test_configure_writes_default_remote_identity(workstation, monkeypatch, capsys, interactive):
+def test_configure_leaves_remote_identity_unset(workstation, monkeypatch, capsys, interactive):
     from vraptor import cli
 
     monkeypatch.setattr(settings.sys.stdin, "isatty", lambda: interactive)
@@ -527,8 +527,8 @@ def test_configure_writes_default_remote_identity(workstation, monkeypatch, caps
     assert cli.main(["setup", "configure"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["configuration"]["connection_defaults"] == {
-        "api_user": "vraptor", "api_role_profile": "provisioning-admin", "run_as": "velociraptor"}
-    assert ("Remote API username [vraptor]: " in prompts) == interactive
+        "api_role_profile": "provisioning-admin", "run_as": "velociraptor"}
+    assert ("Remote API username [blank to leave unset]: " in prompts) == interactive
 
 
 def test_configure_explicit_identity_targets_defaults_or_named_profile(workstation, capsys):
@@ -547,7 +547,7 @@ def test_connection_identity_precedence_and_sources(workstation, level):
     levels = ["default", "connection_defaults", "named", "shared", "repository", "selected", "process", "cli"]
     rank = levels.index(level)
     text = ''
-    expected_user, expected_role, source = "vraptor", "provisioning-admin", "default"
+    expected_user, expected_role, source = None, "provisioning-admin", "default"
     path = settings.default_path()
     if rank >= 1:
         text += '[connection_defaults]\napi_user="vraptor_operator"\napi_role_profile="investigation"\n'
@@ -575,6 +575,10 @@ def test_connection_identity_precedence_and_sources(workstation, level):
     config(home, text)
     result = settings.resolve("lab", repo_root=repo, process_environment=environment, overrides=overrides)
     for key, expected in (("api_user", expected_user), ("api_role_profile", expected_role)):
+        if expected is None:
+            assert key not in result.values
+            assert key not in result.sources
+            continue
         assert result.values[key] == expected
         suffix = (":" + settings.SCHEMA["connections"][key][1]) if source.startswith("environment:") else "." + key
         assert result.sources[key] == (source if source in {"default", "command_line"} else source + suffix)

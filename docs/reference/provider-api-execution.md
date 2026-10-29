@@ -6,15 +6,42 @@ depend on the provider-neutral `AgentRunner` contract in
 `vraptor.agent.runtime`; they do not launch `codex exec` or use provider
 conversation state as resumable forensic state.
 
+Case-bound runs also write the shared [token audit ledger](velociraptor-logging.md#ai-token-usage).
+It records each dispatched attempt once, independently of progress callbacks
+and runtime manifest persistence, with a command summary grouped by provider/model.
+This complements the raw numeric counters below. Do not add ledger records to
+manifest totals: they describe the same requests. Ledger durations exclude
+provider-gate waiting; manifest attempt durations include it.
+
 ## Runtime contract
 
 `AgentRequest` contains the bounded prompt, output name, metadata, optional
 JSON schema, and required capabilities. `AgentResult` contains final output,
-provider/model/protocol, request ID, normalized usage, attempts, terminal
+provider/model/protocol, request ID, normalized and reported usage, attempts, terminal
 status, and a sanitized error class. `AgentEvent` normalizes request start,
 acceptance, progress, usage, retry, completion, failure, timeout, and
 cancellation. Progress callbacks are rate-limited and never contain token text
 or reasoning traces.
+
+`AgentUsage.as_dict()` and `AgentResult.usage` retain the existing four-counter
+normalized shape for the final attempt. `AgentResult.raw_usage` preserves the
+provider's reported numeric/null usage fields, including cache-write and
+reasoning counters when supplied. SDK fields absent from the response remain
+absent; `null` usage means unavailable telemetry, not zero tokens. Text fields
+and full provider responses are never included. Usage trees are bounded to
+128 entries and six nested levels; unusual deeper/larger telemetry is omitted.
+
+`AgentResult.attempt_usage` and the runtime manifest retain each runner attempt's
+number, request ID, status, raw `usage`, `normalized_usage`, and elapsed seconds.
+Attempt elapsed time includes provider-gate waiting but excludes retry backoff;
+operation elapsed time includes both. A failed attempt without provider counters
+remains an explicit unknown. The final-attempt counters must not be added again
+when summing attempt usage. Normalized totals and missing zeros are compatibility
+values, not proof of complete billing. Built OpenAI, Azure, and Anthropic API
+clients disable SDK retries. Injected clients and managed Codex/Claude transports
+may have internal retries not visible to the runner; provider billing remains
+authoritative. Streaming usage snapshots are retained when supplied, including
+on cancellation or connection loss; missing telemetry remains unavailable.
 
 The runtime validates capability requirements and input size before evidence is
 submitted. It resolves one effective output ceiling from the per-request and
@@ -56,13 +83,21 @@ provider runner is actually created. Cache-only state inspection therefore does
 not require provider credentials.
 
 Velociraptor analysis intentionally does not request structured output. Its
-artifact, synthesis, Autoruns, generic-stack, and finding-manager lanes use strict
-tab-delimited line-v2 contracts so Python retains accounting and validation
+artifact, synthesis, Autoruns, generic-stack, and finding-manager lanes use
+validated tab-delimited contracts so Python retains accounting and validation
 authority without repeated JSON keys. Structured output remains available to
 non-Velociraptor callers.
 
 Direct OpenAI and Azure Responses adapters submit prompts as standard
 input-message lists and forward the effective ceiling as `max_output_tokens`.
+Callers may explicitly set `AgentRequest.prompt_cache_prefix_chars` after verifying
+endpoint support. The positive character boundary must fall within the original
+prompt; the runtime rejects other protocols before dispatch. Responses sends two
+content blocks whose concatenation is unchanged, marks the first with an explicit
+cache breakpoint, and opts into explicit cache mode. The default remains one
+ordinary block; there is no automatic cache enablement or TTL change. Input size
+checks still measure the complete prompt. Cache reads/writes remain measured
+provider telemetry; a boundary does not guarantee a cache hit.
 The Codex app-server adapter does not advertise that capability, so its
 `turn/start` request omits the ceiling. The shared ceiling remains a deterministic
 client-side acceptance and validation limit for every transport.
@@ -71,7 +106,8 @@ partial output is never returned as successful work. Safe provider error codes
 and request IDs are retained for retry classification and debug diagnostics.
 The requested ceiling, whether it was sent, provider finish reason, reported
 usage, and locally measured output tokens are retained as bounded scalar
-telemetry; provider error messages and payloads are not persisted.
+telemetry. Numeric usage details are also retained separately in the manifest;
+provider error messages and response payloads are not persisted.
 
 ## Providers
 

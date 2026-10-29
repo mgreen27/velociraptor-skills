@@ -2,11 +2,13 @@ import asyncio
 import json
 import os
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest import mock
 
 import httpx
 import pytest
 from vraptor.agent.additional_providers import (
+    AnthropicMessagesAdapter,
     ClaudeAgentSDKAdapter,
 )
 from vraptor.agent.config import (
@@ -292,6 +294,7 @@ def test_claude_sdk_rejects_incomplete_success_result(stop):
             session_id="test-session",
             result="partial",
             stop_reason=stop,
+            usage={"input_tokens": 5, "output_tokens": 2},
         )
 
     async def run():
@@ -301,9 +304,77 @@ def test_claude_sdk_rejects_incomplete_success_result(stop):
 
     with (
         mock.patch("claude_agent_sdk.query", query),
-        pytest.raises(AgentProviderException),
+        pytest.raises(AgentProviderException) as raised,
     ):
         asyncio.run(run())
+    assert raised.value.error.usage.status == "reported"
+    assert raised.value.error.usage.as_dict()["total_tokens"] == 7
+    assert raised.value.error.request_id == "test-session"
+
+
+def test_anthropic_unexpected_action_preserves_usage():
+    adapter = AnthropicMessagesAdapter(execution("anthropic", "messages"), TimeoutPolicy())
+    with pytest.raises(AgentProviderException) as raised:
+        adapter._finish({
+            "id": "msg-actions", "stop_reason": "end_turn",
+            "usage": {"input_tokens": 5, "output_tokens": 2},
+            "content": [{"type": "tool_use"}],
+        })
+    assert raised.value.error.usage.status == "reported"
+    assert raised.value.error.usage.as_dict()["total_tokens"] == 7
+    assert raised.value.error.request_id == "msg-actions"
+
+
+def test_anthropic_stream_failure_preserves_latest_cumulative_counts():
+    class BrokenMessageStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def __aiter__(self):
+            yield {"type": "message_start", "message": {
+                "id": "msg-partial", "usage": {
+                    "input_tokens": 5, "output_tokens": 0,
+                    "cache_read_input_tokens": 10, "cache_creation_input_tokens": 3,
+                },
+            }}
+            for count in (1, 2, 2):
+                yield {"type": "message_delta", "usage": {"output_tokens": count}}
+            raise ConnectionError("provider disconnected")
+
+    progress = []
+    adapter = AnthropicMessagesAdapter(
+        execution("anthropic", "messages"), TimeoutPolicy(),
+        client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **_kwargs: BrokenMessageStream())),
+    )
+    with pytest.raises(AgentProviderException) as raised:
+        asyncio.run(adapter.execute(request(), progress_callback=progress.append))
+    assert raised.value.error.usage.status == "partial"
+    assert raised.value.error.usage.as_dict()["total_tokens"] == 20
+    assert raised.value.error.usage.cached_input_tokens == 10
+    assert raised.value.error.request_id == "msg-partial"
+    assert [event.metadata["output_tokens"] for event in progress if event.type == "usage_updated"] == [0, 1, 2, 2]
+
+
+@pytest.mark.parametrize("is_error,subtype", [(True, "error_during_execution"), (False, "error_max_turns")])
+def test_claude_unsuccessful_result_preserves_usage(is_error, subtype):
+    ResultMessage = pytest.importorskip("claude_agent_sdk").ResultMessage
+
+    async def query(**_kwargs):
+        yield ResultMessage(
+            subtype=subtype, duration_ms=1, duration_api_ms=1, is_error=is_error,
+            num_turns=1, session_id="failed-session", result="partial",
+            usage={"input_tokens": 5, "output_tokens": 2},
+        )
+
+    adapter = ClaudeAgentSDKAdapter(execution("anthropic", "claude_agent_sdk"), TimeoutPolicy())
+    with mock.patch("claude_agent_sdk.query", query), pytest.raises(AgentProviderException) as raised:
+        asyncio.run(adapter.execute(request()))
+    assert raised.value.error.usage.status == "reported"
+    assert raised.value.error.usage.as_dict()["total_tokens"] == 7
+    assert raised.value.error.request_id == "failed-session"
 
 
 def test_anthropic_real_sdk_streaming_and_cache_usage(tmp_path):

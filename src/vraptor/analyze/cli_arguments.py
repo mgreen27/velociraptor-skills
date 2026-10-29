@@ -33,8 +33,8 @@ def add_skip_ai_argument(parser: argparse.ArgumentParser) -> None:
 
 def add_synthesis_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--synthesis", choices=("none", "full"), default="none",
-        help="none (default) returns preliminary candidates for caller review without artifact/host/hunt AI synthesis; full explicitly requests a final assessment. Run-only.",
+        "--synthesis", choices=("none", "full"), default="full",
+        help="full (default) performs artifact and host/hunt AI synthesis; none returns preliminary candidates without synthesis. --skip-ai disables all AI work. Run-only.",
     )
 
 

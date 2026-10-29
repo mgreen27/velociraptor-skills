@@ -19,6 +19,7 @@ from typing import Any, Callable
 from vraptor.analyze import final_review as host_final_review
 from vraptor.analyze import synthesis as synthesis_policy
 from vraptor.analyze import prompt_debug
+from vraptor.analyze.report_publication import publish_report
 
 from vraptor.agent import diagnostics as agent_diagnostics
 from vraptor.analyze import limits as analysis_limits
@@ -335,8 +336,6 @@ def render_cumulative_host_memory(
         f"- Client: `{latest.get('client_id', '')}`",
         f"- Updated: `{collection.now_utc()}`",
         f"- Completed analysis requests: {len(records)}",
-        "- Velociraptor source of truth: yes",
-        "- Bulk raw result export: no",
     ]
     for record in records:
         result = dict(record.get("result") or {})
@@ -404,30 +403,7 @@ def render_cumulative_host_memory(
                 "",
             ]
         )
-        if result.get("findings"):
-            for finding in result["findings"]:
-                lines.append(
-                    f"### {finding.get('id') or 'Finding'}: "
-                    f"{finding.get('summary', '')}"
-                )
-                lines.append(
-                    f"- Confidence: `{finding.get('confidence', 'unknown')}`"
-                )
-                for source in finding.get("sources") or []:
-                    lines.append(
-                        f"- Source: `{analysis_summary.source_group_text(source)}`"
-                    )
-                for example in finding.get("examples") or []:
-                    fields = "; ".join(
-                        f"{name}={value}"
-                        for name, value in dict(example.get("fields") or {}).items()
-                    )
-                    lines.append(
-                        f"- Example `{example.get('label') or example.get('ref') or '-'}`: {fields}"
-                    )
-                lines.append("")
-        else:
-            lines.extend(analysis_summary.render_compact_findings(result))
+        lines.extend(analysis_summary.render_compact_findings(result))
         lines.extend(["", "### Relevant context", ""])
         lines.extend(analysis_summary.render_relevant_context(result))
         lines.extend(analysis_summary.render_final_review(result))
@@ -454,8 +430,9 @@ def render_cumulative_host_memory(
         if not limitations:
             lines.append("- None identified.")
         lines.extend(["", "### Bounded follow-up", ""])
-        lines.extend(f"- {item}" for item in result.get("bounded_follow_up") or [])
-        if not result.get("bounded_follow_up"):
+        if result.get("bounded_follow_up"):
+            lines.extend(analysis_summary.render_follow_up(result))
+        else:
             lines.append("- No bounded follow-up recorded; retain unresolved leads and coverage limitations above.")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -524,6 +501,7 @@ def resume_analysis_command(
                    "--question", question, "--task-mode", str(getattr(args, "task_mode", "host-forensics"))]
     if getattr(args, "response_depth", ""):
         resume_argv.extend(["--response-depth", str(args.response_depth)])
+    resume_argv.extend(["--synthesis", getattr(args, "synthesis", "full")])
     for option in ("server_profile", "api_client", "org_id", "time_after", "time_before", "autoruns_golden_db", "query_timeout_seconds"):
         if getattr(args, option, None):
             resume_argv.extend(["--" + option.replace("_", "-"), str(getattr(args, option))])
@@ -1162,7 +1140,7 @@ async def execute_incremental_analysis_async(
     route = spec.route
     operation_log.emit("analysis_configuration", stage="analysis", provider=route.provider,
                        model=route.model, reasoning_effort=route.reasoning_effort,
-                       mode=getattr(args, "synthesis", "none"))
+                       mode=getattr(args, "synthesis", "full"))
     shared_runner: Any = None
     shared_limits: dict[str, Any] | None = None
     runner_lock = asyncio.Lock()
@@ -1554,7 +1532,7 @@ async def _execute_incremental_analysis(
                 ),
             )
 
-        artifact_plan["synthesis_mode"] = getattr(args, "synthesis", "none")
+        artifact_plan["synthesis_mode"] = getattr(args, "synthesis", "full")
         run = await _await_if_needed(collection_analysis_runtime.execute_analysis_workload_async(
                 plan=artifact_plan,
                 chunk_csv=chunk_csv,
@@ -1927,7 +1905,7 @@ async def _execute_incremental_analysis(
         )
     combined_plan["time_filter"] = combined_time_filter
     state["time_filter"] = copy.deepcopy(combined_time_filter)
-    combined_plan["synthesis_mode"] = getattr(args, "synthesis", "none")
+    combined_plan["synthesis_mode"] = getattr(args, "synthesis", "full")
     ordered_results = [copy.deepcopy(artifact_results[key]) for key in ordered_keys]
     final_limits = (
         collection_analysis_runtime.limits_from_plan(combined_plan)
@@ -2219,7 +2197,7 @@ async def run_analysis_async(
     if rebuild_only:
         publish_host_artifact_reports(paths=paths)
         report = render_cumulative_host_memory(paths=paths)
-        atomic_io.write_text_atomic(paths["host_report"], report)
+        publish_report(paths["host_report"], report)
         return {
             "schema_version": 1,
             "status": "rebuilt",
@@ -2276,7 +2254,7 @@ async def run_analysis_async(
     progress_lock = threading.Lock()
 
     def publish(text: str) -> None:
-        atomic_io.write_text_atomic(paths["host_report"], text)
+        publish_report(paths["host_report"], text)
 
     def update_progress(event: dict[str, Any]) -> None:
         with progress_lock:
@@ -2493,7 +2471,7 @@ async def run_analysis_async(
     ).hexdigest()
     host_analysis_state.persist(paths["host_state"], state)
     cumulative_report = render_cumulative_host_memory(paths=paths)
-    atomic_io.write_text_atomic(paths["host_report"], cumulative_report)
+    publish_report(paths["host_report"], cumulative_report)
     result = {
         "schema_version": 1,
         "status": run["status"],

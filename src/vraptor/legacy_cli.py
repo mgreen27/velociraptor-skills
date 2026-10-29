@@ -429,50 +429,19 @@ def _record_command_context(args: list[str]) -> None:
 
 
 def _bind_default_log(args: list[str]) -> None:
-    if not args or args[0] not in {"setup", "collect", "hunt", "autoruns", "analyze", "export"}:
-        return
-    engagement_id = _option_value(
-        args,
-        "--engagement-id",
-        "--investigation-id",
-        "--id",
-    )
-    if not engagement_id:
-        engagement_id = _option_value(args, "--server-profile")
-    if not engagement_id:
-        return
-    case_root_arg = _option_value(args, "--case-root") or None
-    from vraptor.paths import resolve_case_root
-
-    case_root = resolve_case_root(case_root_arg, repository_root())
-    operation_log.bind_case(case_root, engagement_id)
+    operation_log.bind_cli_destination(args)
 
 
 def main(argv: list[str] | None = None, *, dispatch=None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    try:
-        args, log_options = operation_log.extract_global_options(raw_args)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    with operation_log.OperationLogger(
-        _command_label(args),
-        options=log_options,
-    ) as logger:
+
+    def run(args):
         _bind_default_log(args)
         _record_command_context(args)
-        try:
-            result = (dispatch or _dispatch)(args)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as exc:
-            operation_log.record_exception(exc, stage="dispatch")
-            raise
-        logger.finalize(
-            status="complete" if result == 0 else "failed",
-            exit_code=result,
-        )
-        return result
+        from .analyze import reporting
+        return reporting.run_with_policy(args, dispatch or _dispatch)
+
+    return operation_log.run_operation(raw_args, run)
 
 
 if __name__ == "__main__":

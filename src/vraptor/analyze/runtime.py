@@ -31,6 +31,7 @@ from vraptor.analyze import final_review as host_final_review
 from vraptor.analyze import synthesis as synthesis_policy
 from vraptor.analyze import prompt_debug
 from vraptor.analyze import recovery
+from vraptor.analyze import report_priority
 
 
 RUN_SCHEMA_VERSION = 8
@@ -246,6 +247,8 @@ def render_chunk_prompt(
         "rows, evidence values, an evidence catalogue, or review-accounting prose. "
         "A finding requires at least one EVIDENCE record. Python will hydrate exact "
         "evidence and provenance from the referenced source row.\n\n"
+        f"{collection_analysis.CONFIDENCE_INSTRUCTION}\n"
+        f"{report_priority.prompt_instruction()}\n"
         "The _SourceRef column is coordinator-owned reference metadata. Copy its "
         "Sxxxx-R<number> value into the reference position. Never return _SourceRef "
         "as evidence and never copy any source value into the response. "
@@ -255,6 +258,7 @@ def render_chunk_prompt(
         "metadata; do not repeat them:\n"
         "RESULT\tfindings\n"
         "FINDING\tF1\thigh\tExecution,Credential Access\tConcise question-relevant finding.\n"
+        "PRIORITY\tF1\thigh\tEvidence supports material incident impact requiring prompt action.\n"
         f"{example_evidence}"
         f"CONTEXT\tF1\t{example_ref}\tidentity\tMaterial identity or causal context that changes interpretation.\n"
         f"{uplift_example}"
@@ -327,6 +331,12 @@ def _compact_worker_result(result: dict[str, Any]) -> str:
             f"FINDING\t{finding['id']}\t{finding['confidence']}\t"
             f"{','.join(finding.get('domains') or [])}\t{clipped(finding['summary'])}"
         )
+        priority = report_priority.priority_metadata(finding)
+        if priority["report_priority"] != "unranked" or priority["priority_rationale"]:
+            lines.append(
+                f"PRIORITY\t{finding['id']}\t{priority['report_priority']}\t"
+                f"{clipped(priority['priority_rationale'])}"
+            )
         finding_rows = list(finding.get("rows") or [])
         for row in finding_rows:
             lines.append(f"EVIDENCE\t{finding['id']}\t{row['ref']}")
@@ -435,6 +445,7 @@ def _artifact_synthesis_limit_fallback(
                 {
                     "id": f"F{finding_number}",
                     "confidence": str(finding["confidence"]),
+                    **report_priority.priority_metadata(finding),
                     "domains": list(finding.get("domains") or []),
                     "summary": str(finding["summary"]),
                     "evidence": [
@@ -570,6 +581,11 @@ def render_synthesis_prompt(
         task_mode=task_mode,
         response_depth=response_depth,
     )
+    context_refs = sorted({
+        item["ref"] for worker in visible_chunks.values()
+        for item in worker.get("relevant_context") or []
+        if item.get("fields")
+    })
     return (
         "You are a read-only DFIR synthesis analyst. Use only the compact, validated "
         "analysis results below. Do not infer raw evidence or create an evidence "
@@ -586,22 +602,29 @@ def render_synthesis_prompt(
         f"Task mode: {task_mode or 'unspecified'}\n"
         f"Response depth: {response_depth or 'standard'}\n\n"
         f"Output policy: {output_policy}\n\n"
+        f"{collection_analysis.CONFIDENCE_INSTRUCTION}\n"
+        f"{report_priority.prompt_instruction()}\n"
         "Return plain text in this exact structure. The coordinator already owns "
         "task, question, status, and coverage metadata; do not repeat them:\n"
         "ANSWER\nConcise direct answer.\n\n"
         "FINDINGS\n"
         "FINDING\tM1\thigh\tExecution,Credential Access\tCoherent finding.\n"
+        "PRIORITY\tM1\thigh\tEvidence supports material incident impact requiring prompt action.\n"
         "EVIDENCE\tM1\tSxxxx-R<number>\n\n"
         "RELEVANT_CONTEXT\n"
         "CONTEXT\tM1\tSxxxx-R<number>\tidentity\tQuestion-relevant context\n"
         "or None. Use '-' instead of M1 only for environment-level context. CONTEXT must cite an accepted CONTEXT record and use identity, session, process, file, network, timeline, environment, or general as its type.\n\n"
+        f"Allowed CONTEXT references: {json.dumps(context_refs)}. "
+        "If this list is empty, write None. in RELEVANT_CONTEXT. "
+        "EVIDENCE must cite an input EVIDENCE record, not a context-only row. "
+        "A row mentioned in prose is not permission to cite it. Never expand omitted rows or reference ranges.\n\n"
         "LIMITATIONS\nCoverage or confidence limitations or None.\n\n"
         "FOLLOW_UP\nSmallest bounded follow-up or None.\n"
         "END\n\n"
         "When coverage failed, describe only what accepted evidence established. "
         "Use only these Enterprise ATT&CK tactic names: "
         f"{', '.join(collection_analysis.ATTACK_TACTICS)}. "
-        "Inside FINDINGS, emit only FINDING and EVIDENCE records, or exactly "
+        "Inside FINDINGS, emit only FINDING, PRIORITY, and EVIDENCE records, or exactly "
         "None. Do not add prose, bullets, headings, CONTEXT, LIMITATION, or "
         "FOLLOW_UP records there. For each synthesized FINDING, use only tactics "
         "already assigned to its cited input EVIDENCE records. The synthesized "
@@ -657,6 +680,10 @@ def render_retry_prompt(
         "names and exact source references shown by the original input or "
         "diagnostics. Do not guess, substitute, or copy evidence values or field "
         "names. Use exactly one Sxxxx-R<number> per EVIDENCE or CONTEXT record. "
+        "Reference permissions are record-specific: an EVIDENCE reference is not automatically "
+        "valid for CONTEXT or for another candidate's DISPOSITION. If no allowed CONTEXT "
+        "references exist, use None. in RELEVANT_CONTEXT. Downgrade candidates only through "
+        "their DISPOSITION when that section is required; Python creates their context. "
         "Link CONTEXT to a returned finding ID, or use '-' only with ContextType environment. "
         "Copy assigned headers exactly; coordinator-owned metadata is "
         "authoritative.\n"
@@ -680,11 +707,16 @@ async def _validated_pool_async(
     correction_attempts = analysis_limits.correction_attempts(correction_attempts)
     accepted: dict[str, dict[str, Any]] = {}
     records: dict[str, dict[str, Any]] = {}
+    execution_cancelled = False
 
     async def execute_safely(task: AgentRequest) -> AgentResult:
+        nonlocal execution_cancelled
         try:
             value = execute(task)
             return await value if inspect.isawaitable(value) else value
+        except asyncio.CancelledError:
+            execution_cancelled = True
+            raise
         except Exception as exc:
             return AgentResult(
                 task_id=task.task_id,
@@ -865,6 +897,10 @@ async def _validated_pool_async(
             )
             for future in completed:
                 await collect_future(future)
+    # TaskGroup treats a child cancellation as normal termination. Do not turn
+    # that missing result into a failed synthesis lookup or successful empty pool.
+    if execution_cancelled:
+        raise asyncio.CancelledError
     return accepted, records
 
 
@@ -879,6 +915,7 @@ def _direct_artifact_result(
             {
                 "id": str(finding["id"]),
                 "confidence": str(finding["confidence"]),
+                **report_priority.priority_metadata(finding),
                 "domains": list(finding.get("domains") or []),
                 "summary": str(finding["summary"]),
                 "evidence": [
@@ -992,6 +1029,7 @@ def _artifact_as_host_worker(
             {
                 "id": finding_ids[str(finding["id"])],
                 "confidence": str(finding["confidence"]),
+                **report_priority.priority_metadata(finding),
                 "domains": list(finding.get("domains") or []),
                 "summary": str(finding["summary"]),
                 "rows": rows,
@@ -1582,7 +1620,9 @@ async def execute_analysis_workload_async(
         for index, chunk in sorted(chunk_by_index.items())
     )
 
-    def validate_chunk(task: AgentRequest, output: str) -> dict[str, Any]:
+    def validate_chunk(
+        task: AgentRequest, output: str, *, allow_legacy_priority: bool = False,
+    ) -> dict[str, Any]:
         chunk = dict(task.metadata["chunk"])
         source_rows = source_rows_by_index[int(chunk["chunk_index"])]
         return collection_analysis.validate_context_worker_result(
@@ -1595,6 +1635,7 @@ async def execute_analysis_workload_async(
             expected_row_count=int(chunk["row_count"]),
             source_rows=source_rows,
             allow_uplift_candidates=bool(plan.get("allow_uplift_candidates")),
+            allow_legacy_priority=allow_legacy_priority,
         )
 
     reused_chunks: dict[str, dict[str, Any]] = {}
@@ -1605,7 +1646,9 @@ async def execute_analysis_workload_async(
             cached = chunk_recovery.get(task) if chunk_recovery is not None else None
             if cached is not None:
                 try:
-                    reused_chunks[task.task_id] = validate_chunk(task, recovery.worker_text(cached))
+                    reused_chunks[task.task_id] = validate_chunk(
+                        task, recovery.worker_text(cached), allow_legacy_priority=True,
+                    )
                 except (ValueError, KeyError, TypeError):
                     pass  # Changed/corrupt decisions are reviewed again, never trusted.
                 else:

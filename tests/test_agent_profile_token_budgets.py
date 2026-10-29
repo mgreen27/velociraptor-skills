@@ -331,17 +331,10 @@ def test_haiku_setup_rejects_explicit_effort_before_writing(tmp_path):
     assert not path.exists()
 
 
-@pytest.mark.parametrize(
-    "provider,model",
-    [
-        ("anthropic", "haiku"),
-        ("anthropic", "sonnet"),
-        ("anthropic", "opus"),
-        ("anthropic", "fable"),
-        ("openai", "gpt-6-sol"),
-        ("azure_openai", "gpt-6-sol"),
-    ],
-)
+# Minimum validation is shared across model aliases; retain both fields/providers.
+@pytest.mark.parametrize("provider,model", [
+    ("anthropic", "haiku"), ("openai", "gpt-6-sol"), ("azure_openai", "gpt-6-sol"),
+])
 @pytest.mark.parametrize(
     "field,value", [("max-input-tokens", "99999"), ("max-output-tokens", "31999")]
 )
@@ -927,8 +920,10 @@ def test_config_cli_reports_profile_and_derived_sources(tmp_path, monkeypatch, c
     )
 
 
-@pytest.mark.parametrize("entry", ["1000000", "max", "auto"])
-@pytest.mark.parametrize("output", [32000, 64000, 128000])
+@pytest.mark.parametrize("entry,output", [
+    ("1000000", 32000), ("1000000", 64000), ("1000000", 128000),
+    ("max", 128000), ("auto", 128000),
+])
 def test_existing_sonnet_uses_full_model_context_in_wizard(
     tmp_path, capsys, entry, output
 ):

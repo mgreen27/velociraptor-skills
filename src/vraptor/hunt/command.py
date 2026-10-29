@@ -2958,16 +2958,7 @@ def render_hunt_chat_summary(analyses: list[dict[str, Any]]) -> str:
     if not rendered:
         return "## Hunt analysis summary\n\nNo analyses were returned.\n"
     rendered += "\n"
-    if len(rendered) <= analysis_summary.MAX_CHAT_SUMMARY_CHARS:
-        return rendered
-    suffix = (
-        "\n\nCombined chat summary reached its 32,000-character guard; consult "
-        "the per-hunt summaries and canonical reports for remaining detail.\n"
-    )
-    clipped = rendered[
-        : analysis_summary.MAX_CHAT_SUMMARY_CHARS - len(suffix)
-    ].rsplit("\n", 1)[0].rstrip()
-    return clipped + suffix
+    return analysis_summary.bound_chat_markdown(rendered)
 
 
 def preflight_hunt_outputs(output_root: Path, hunt_id: str) -> None:
@@ -3247,7 +3238,7 @@ def command_analyze(args: argparse.Namespace) -> dict[str, Any]:
                 analyses.append(
                     flow_analysis_coordinator.analyze_hunt_flows(
                         api,
-                        synthesis_mode=getattr(args, "synthesis", "none"),
+                        synthesis_mode=getattr(args, "synthesis", "full"),
                         org_id=str(getattr(api, "org_id", "root") or "root"),
                         hunt_id=hunt_id,
                         hunt_state=normalized_hunt_state,
@@ -3353,7 +3344,7 @@ def command_analyze(args: argparse.Namespace) -> dict[str, Any]:
                     autoruns_ai_review_enabled=bool(analyst_spec and analyst_spec.enabled),
                     skip_ai=skip_ai,
                     finding_consolidation_spec=analyst_spec,
-                    synthesis_mode=getattr(args, "synthesis", "none"),
+                    synthesis_mode=getattr(args, "synthesis", "full"),
                     debug_validation=bool(getattr(args, "debug", False)),
                     include_review_rows=bool(args.include_review_rows),
                     progress_callback=(

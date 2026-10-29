@@ -60,6 +60,8 @@ class Selection:
     source_path: str = ""
     analysis_defaults: dict[str, Any] = field(default_factory=dict)
     analysis_profile: dict[str, Any] = field(default_factory=dict)
+    reporting_defaults: dict[str, Any] = field(default_factory=dict)
+    reporting_profile: dict[str, Any] = field(default_factory=dict)
 
 
 def setting(layers: Any, variable: str) -> str:
@@ -150,6 +152,8 @@ def _fields(value: Any, allowed: frozenset[str], section: str) -> dict[str, Any]
     for name, item in value.items():
         if name == "enabled":
             valid = isinstance(item, bool)
+        elif name in PROFILE_BUDGET_FIELDS and item == "max":
+            valid = True
         elif name.endswith("correction_attempts"):
             valid = (
                 isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 5
@@ -218,6 +222,7 @@ def normalize_document(data: Mapping[str, Any]) -> dict[str, Any]:
         "selection",
         "execution_defaults",
         "analysis_defaults",
+        "reporting",
         "connections",
         "profiles",
     }
@@ -234,6 +239,8 @@ def normalize_document(data: Mapping[str, Any]) -> dict[str, Any]:
     analysis_defaults = _fields(
         data.get("analysis_defaults", {}), ANALYSIS_FIELDS, "analysis_defaults"
     )
+    from vraptor.analyze.reporting import validate_values
+    reporting = validate_values(data.get("reporting", {}))
     connections = {
         name: _connection(value)
         for name, value in _named_tables(data, "connections").items()
@@ -241,13 +248,15 @@ def normalize_document(data: Mapping[str, Any]) -> dict[str, Any]:
     profiles = {}
     for name, value in _named_tables(data, "profiles").items():
         profile = _fields(
-            {key: item for key, item in value.items() if key != "source"},
+            {key: item for key, item in value.items() if key not in {"source", "reporting"}},
             EXECUTION_FIELDS
             | CONNECTION_FIELDS
             | PROFILE_BUDGET_FIELDS
             | {"connection"},
             "profiles",
         )
+        if "reporting" in value:
+            profile["reporting"] = validate_values(value["reporting"], f"profiles.{name}.reporting")
         if "source" in value:
             profile["source"] = _source(value["source"])
         if sum(key in profile for key in ("provider", "connection", "source")) != 1:
@@ -275,6 +284,7 @@ def normalize_document(data: Mapping[str, Any]) -> dict[str, Any]:
         ("selection", selection),
         ("execution_defaults", defaults),
         ("analysis_defaults", analysis_defaults),
+        ("reporting", reporting),
         ("connections", connections),
     ):
         if section in data:
@@ -386,7 +396,8 @@ def load_selection(layers: Any, cli: Mapping[str, Any]) -> Selection:
     )
     data, config_path = load_document(layers, cli)
     result = Selection(
-        path=config_path, analysis_defaults=dict(data.get("analysis_defaults", {}))
+        path=config_path, analysis_defaults=dict(data.get("analysis_defaults", {})),
+        reporting_defaults=dict(data.get("reporting", {}))
     )
     path = Path(config_path)
     if not profile and mode in {"auto", "application"}:
@@ -396,6 +407,7 @@ def load_selection(layers: Any, cli: Mapping[str, Any]) -> Selection:
         if selected is None:
             raise RuntimeError("Selected execution profile does not exist")
         result.profile = profile
+        result.reporting_profile = dict(selected.get("reporting", {}))
         result.analysis_profile = {
             key: selected[key] for key in PROFILE_BUDGET_FIELDS if key in selected
         }

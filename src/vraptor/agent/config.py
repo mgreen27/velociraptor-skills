@@ -89,6 +89,8 @@ class UnresolvedAgentConfig:
     selection: Mapping[str, str] = field(default_factory=_empty_mapping)
     analysis_defaults: Mapping[str, Any] = field(default_factory=_empty_mapping)
     analysis_profile: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    reporting_defaults: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    reporting_profile: Mapping[str, Any] = field(default_factory=_empty_mapping)
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,8 @@ class ResolvedAgentRoute:
     config_file: str = ""
     analysis_defaults: Mapping[str, Any] = field(default_factory=_empty_mapping)
     analysis_profile: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    reporting_defaults: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    reporting_profile: Mapping[str, Any] = field(default_factory=_empty_mapping)
     detected_harness: str = ""
     model_context_tokens: int = 0
     model_max_output_tokens: int = 0
@@ -765,6 +769,8 @@ def collect_unresolved_agent_config(
         selection=selection,
         analysis_defaults=MappingProxyType(selected.analysis_defaults),
         analysis_profile=MappingProxyType(selected.analysis_profile),
+        reporting_defaults=MappingProxyType(selected.reporting_defaults),
+        reporting_profile=MappingProxyType(selected.reporting_profile),
     )
     source_mode, _source = _selected_text(provisional, "config_source_mode")
     source_mode = source_mode.lower()
@@ -1386,6 +1392,8 @@ def resolve_unresolved_agent_route(
         config_file=unresolved.selection.get("config_file", ""),
         analysis_defaults=unresolved.analysis_defaults,
         analysis_profile=unresolved.analysis_profile,
+        reporting_defaults=unresolved.reporting_defaults,
+        reporting_profile=unresolved.reporting_profile,
         detected_harness=unresolved.selection.get("detected_harness", ""),
         **extras,
     )

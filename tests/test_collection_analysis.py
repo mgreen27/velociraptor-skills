@@ -1208,7 +1208,7 @@ class CollectionAnalysisTest(unittest.TestCase):
             captured.exception.diagnostics,
             [
                 {
-                    "allowed": ["FINDING", "EVIDENCE"],
+                    "allowed": ["FINDING", "EVIDENCE", "PRIORITY"],
                     "code": "unsupported_record",
                     "line": 1,
                     "record": "FINDINGS",

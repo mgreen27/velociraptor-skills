@@ -162,7 +162,9 @@ Every completed or provisional command response also includes a non-empty
 bounded Markdown `chat_summary`. Normal streaming derives it from the compact
 Python-owned synthesis result. Specialized Autoruns and generic-stack paths use
 their bounded workflow summaries, and grouped hunt responses combine per-hunt
-summaries under the same 32,000-character guard. Callers must surface this value
+summaries under the shared reporting policy's chat guard (32,000 characters by
+default). Priority selection and overflow follow the
+[reporting policy](reporting-policy.md). Callers must surface this value
 to the operator. Default stdout is bounded text and interactive or
 operator-initiated runs must retain it. Use `--format json` only when an explicit
 downstream integration will parse the unchanged structured response.

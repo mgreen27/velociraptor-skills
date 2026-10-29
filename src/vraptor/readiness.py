@@ -312,14 +312,19 @@ def verify_api_authorization(
 
     rows = remote_query(
         config_path,
-        "SELECT name, roles, effective_policy FROM gui_users() WHERE name = whoami()",
+        "SELECT whoami() AS identity, name, org_id, roles, effective_policy FROM gui_users() WHERE name = whoami()",
     )
-    if not rows:
+    if len(rows) != 1:
         raise RuntimeError("Could not verify the live API user's server-side roles.")
     row = dict(rows[0])
     returned_user = str(row.get("name") or row.get("Name") or "").strip()
-    if returned_user and returned_user != api_user:
+    if returned_user != api_user or row.get("identity") != api_user:
         raise RuntimeError("Live API role verification returned a different identity.")
+    from vraptor.api import resolve_org_id
+    from vraptor.api_provisioning import normalized_org
+    expected_org = resolve_org_id(None)
+    if "org_id" not in row or normalized_org(row["org_id"]) != normalized_org(expected_org):
+        raise RuntimeError("Live API role verification returned a different organization.")
     roles = _string_list(row.get("roles") or row.get("Roles"))
     policy_value = (
         row.get("effective_policy")
@@ -347,13 +352,17 @@ def verify_api_authorization(
             f"Live API role profile {role_profile} is missing required roles: "
             + ", ".join(missing)
         )
-    if role_profile == "investigation" and "administrator" in roles:
+    effective = set(effective_permissions)
+    if role_profile == "investigation" and (
+        "administrator" in roles or {"SERVER_ADMIN", "SUPER_USER"} & effective
+    ):
         raise RuntimeError(
-            "Live API credential has administrator but the investigation profile "
+            "Live API credential has administrator permissions but the investigation profile "
             "was selected. Use a least-privilege credential or explicitly select "
             "--api-role-profile provisioning-admin."
         )
-    effective = set(effective_permissions)
+    if "ANY_QUERY" not in effective:
+        raise RuntimeError("Live API credential is missing effective ANY_QUERY permission.")
     if role_profile == "investigation":
         required_permissions = {
             "ANY_QUERY",
@@ -375,6 +384,7 @@ def verify_api_authorization(
     return {
         "status": "verified",
         "api_user": api_user,
+        "org_id": expected_org,
         "role_profile": role_profile,
         "roles": roles,
         "effective_permissions": effective_permissions,
@@ -932,11 +942,6 @@ def live_api_identity(
     return api_client_path, api_user
 
 
-def recoverable_live_api_auth_error(error: RuntimeError) -> bool:
-    message = str(error).lower()
-    return "user not found:" in message or "requires permission any_query" in message
-
-
 def _command_live_remote(
     args: argparse.Namespace,
     leaf_manifest_path: Path,
@@ -961,6 +966,8 @@ def _command_live_remote(
     ).strip()
     fetch_started = time.monotonic()
     supplied_api = getattr(args, "api_client", None)
+    if getattr(args, "provision_api", False) and not supplied_api:
+        raise RuntimeError("Account provisioning requires vraptor setup start --provision-api; readiness never repairs accounts or replaces credentials.")
     if supplied_api:
         api_path = Path(supplied_api).expanduser().resolve()
         identity = validate_api_client_security(api_path)["identity"]
@@ -977,30 +984,7 @@ def _command_live_remote(
         api_client_path, api_user = live_api_identity(leaf_manifest)
     fetch_seconds = time.monotonic() - fetch_started
     api_reachability_started = time.monotonic()
-    recovery_attempted = regenerate_remote_api
-    try:
-        server_reachable = verify_api_reachable(api_client_path, use_local_cli=False)
-    except RuntimeError as exc:
-        if (supplied_api or regenerate_remote_api or not getattr(args, "provision_api", False)
-                or not recoverable_live_api_auth_error(exc)):
-            raise
-        recovery_server_ip = str(
-            getattr(args, "server_ip", None)
-            or leaf_manifest.get("server_ip")
-            or ""
-        ).strip()
-        recovery_started = time.monotonic()
-        leaf_manifest = run_live_api_fetch(
-            args,
-            leaf_manifest_path,
-            fetch_env,
-            regenerate_remote_api=True,
-            server_ip=recovery_server_ip,
-        )
-        fetch_seconds += time.monotonic() - recovery_started
-        recovery_attempted = True
-        api_client_path, api_user = live_api_identity(leaf_manifest)
-        server_reachable = verify_api_reachable(api_client_path, use_local_cli=False)
+    server_reachable = verify_api_reachable(api_client_path, use_local_cli=False)
     api_reachability_seconds = time.monotonic() - api_reachability_started
     if not server_reachable:
         raise RuntimeError("Fetched remote API client but could not query the remote Velociraptor API.")
@@ -1053,7 +1037,7 @@ def _command_live_remote(
         "api_reachability_seconds": round(api_reachability_seconds, 3),
         "target_verification_seconds": round(target_verification_seconds, 3),
         "total_seconds": round(time.monotonic() - setup_started, 3),
-        "remote_recovery_attempted": recovery_attempted,
+        "remote_recovery_attempted": False,
         "fetch_detail": dict(leaf_manifest.get("timing") or {}),
     }
     return build_unified_manifest(
@@ -1147,7 +1131,7 @@ def build_parser() -> argparse.ArgumentParser:
     live_cmd.add_argument("--server-ip", dest="server_ip", help="Remote SSH host, required when fetching credentials.")
     live_cmd.add_argument("--api-client", help="Use existing API credentials directly, without SSH provisioning.")
     live_cmd.add_argument("--client-id", help="Require this live client to be visible.")
-    live_cmd.add_argument("--provision-api", action="store_true", help="Allow generation of missing remote API credentials and one authentication recovery attempt.")
+    live_cmd.add_argument("--provision-api", action="store_true", help="Use setup start --provision-api for account creation; readiness never repairs authentication failures.")
     live_cmd.add_argument(
         "--server-profile",
         "--engagement-code",

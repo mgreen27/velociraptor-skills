@@ -67,6 +67,9 @@ Use `./utils/install.sh --no-configure` to skip the wizard during upgrades;
 add `--no-path` for dependency-only installation or CI. Non-interactive runs also
 skip the wizard. Run bare
 `./vraptor setup configure` later to reopen the wizard.
+Remote API usernames must be selected explicitly before fetching or provisioning
+credentials. Account creation requires explicit authorization and `--provision-api`;
+existing accounts are preserved. See [account setup](skills/velociraptor-live-api-client/references/service-account-config.md).
 Remote API access needs no local Velociraptor binary, SSH connection or Codex login.
 The offline checks above do not prove live authentication; explicit connection
 and AI tests are in the guide.
@@ -204,13 +207,23 @@ metrics, and bounded sanitized server text to
 redacted; server text may still contain evidence-sensitive paths, usernames,
 hostnames, or VQL. See the [logging reference](docs/reference/velociraptor-logging.md).
 
+AI requests also append provider-reported token counts to
+`<case-root>/<id>/logs/token-usage.jsonl`: one record per request attempt and
+one command-end summary across concurrent agents, grouped by provider and model.
+Retries are counted separately; missing usage is marked unavailable. This log
+contains counters and identifiers, without prompts or responses. `--no-log-file`
+disables both logs. Use `vraptor logs usage --global --json` for retained local
+provider-token accounting; these observations are not billed charges.
+
 Current analysis capabilities include `--skip-ai` deterministic preparation,
-caller-led final review by default (`--synthesis none`), optional harness review
-with `--synthesis full`, current per-artifact host reports, and reusable
+full synthesis by default (`--synthesis full`), explicitly requested caller-led
+review with `--synthesis none`, current per-artifact host reports, and reusable
 readiness without an elapsed-time expiry. See the [preparation contract](docs/reference/analysis-skip-ai.md)
 and [final-review contract](skills/velociraptor-host-analysis/references/final-review.md).
 Use `analysis-results` to retrieve saved candidates and `summarize` for a saved-results
 review; see the [synthesis contract](docs/reference/analysis-synthesis.md).
+Report limits control presentation independently of inference budgets and preserve
+selected evidence; see [reporting policy](docs/reference/reporting-policy.md).
 Autoruns uses native deduplication and regex filtering with the schema-10
 GoldenDB; maintain its reviewed CSV and generated database together using the
 [GoldenDB workflow](src/vraptor/resources/golden/README.md).

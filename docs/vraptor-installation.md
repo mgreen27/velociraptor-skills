@@ -198,8 +198,12 @@ profile storage, naming and override behavior.
 
 The configuration prompts do not connect to Velociraptor, fetch credentials,
 create accounts or start a case. Setting an API username alone does not create
-that server identity. On a fresh configuration it defaults to `vraptor`, with
-`provisioning-admin` as the role profile; existing explicit values are retained.
+that server identity. A fresh configuration has no remote API username and uses
+`provisioning-admin` as the role profile. Set the intended username before fetching
+or provisioning API credentials. Existing API YAML can supply its identity when no
+username is selected. Existing explicit values, including explicitly selected legacy names, are retained;
+use `setup show --server-profile NAME` to inspect them and configure a replacement
+explicitly when needed.
 Named connections inherit shared `[connection_defaults]` unless overridden.
 An existing API YAML's embedded server address is used for API connections;
 the optional server address in setup is for SSH acquisition.

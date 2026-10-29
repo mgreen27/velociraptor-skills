@@ -339,7 +339,7 @@ SSH_ARGS=(-o BatchMode=yes -o IdentitiesOnly=yes "${SSH_KEYCHAIN_ARGS[@]}" -o Us
 SSH_TARGET="${REMOTE_SSH_USER}@${SERVER_IP}"
 LOCAL_TEMP_PATH="${LOCAL_DEST_PATH}.tmp.$$"
 REMOTE_DEST_DIR="$(remote_dirname "$REMOTE_OUTPUT_PATH")"
-prepare_remote_commands "$REMOTE_OUTPUT_PATH" "set -e; umask 077; mkdir -p $(shell_quote "$REMOTE_DEST_DIR"); $(shell_quote "$REMOTE_VELOCIRAPTOR_BIN") --config $(shell_quote "$REMOTE_SERVER_CONFIG_PATH") config api_client --name $(shell_quote "$API_USER") --role $(shell_quote "$API_ROLES") $(shell_quote "$REMOTE_OUTPUT_PATH")" api
+prepare_remote_commands "$REMOTE_OUTPUT_PATH" "set -e; umask 077; mkdir -p $(shell_quote "$REMOTE_DEST_DIR"); $(shell_quote "$REMOTE_VELOCIRAPTOR_BIN") --config $(shell_quote "$REMOTE_SERVER_CONFIG_PATH") config api_client --name $(shell_quote "$API_USER") $(shell_quote "$REMOTE_OUTPUT_PATH")" api
 
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'umask 077\n'

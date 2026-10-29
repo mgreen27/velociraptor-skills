@@ -1401,6 +1401,8 @@ class FlowAnalysisTest(unittest.TestCase):
                             "id": "F1",
                             "summary": "Malicious encoded command.",
                             "confidence": "high",
+                            "report_priority": "critical",
+                            "priority_rationale": "Immediate containment review warranted.",
                             "domains": ["execution"],
                             "evidence": [
                                 {
@@ -1411,6 +1413,12 @@ class FlowAnalysisTest(unittest.TestCase):
                             ],
                         }
                     )
+                    # The same payload can support several findings. Retain the
+                    # highest priority even if a lower-priority finding arrives first.
+                    findings.insert(0, {
+                        **findings[0], "id": "F0", "summary": "Limited follow-up observation.",
+                        "report_priority": "low", "priority_rationale": "Limited follow-up.",
+                    })
                 yield {
                     "status": "accepted",
                     "chunk_id": str(dict(work["manifest"])["chunk_id"]),
@@ -1457,6 +1465,8 @@ class FlowAnalysisTest(unittest.TestCase):
             context = json.loads(
                 Path(result["detectraptor_interesting_context_file"]).read_text()
             )
+            self.assertIn('"report_priority": "critical"', json.dumps(context))
+            self.assertIn("Immediate containment review warranted.", json.dumps(context))
             uplift_path = Path(result["detectraptor_whitelist_candidates_file"])
             uplift_text = uplift_path.read_text()
             uplift_lines = uplift_text.splitlines(keepends=True)

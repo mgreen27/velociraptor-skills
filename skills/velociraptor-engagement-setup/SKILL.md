@@ -5,6 +5,7 @@ description: Start or resume Velociraptor investigations using a local server an
 
 # Velociraptor Engagement Setup
 
+
 For first installation, follow [Install and set up vraptor](../../docs/vraptor-installation.md):
 install the package and selected AI extras, use the combined operational/AI
 configuration wizard, verify settings, then select an investigation mode.
@@ -71,9 +72,12 @@ inspect effective sources before changing a saved value again.
 Remote profiles inherit `api_user` and `api_role_profile` from
 `[connection_defaults]`, including previously unseen profile names. Precedence is
 CLI > environment/dotenv > named connection > connection defaults > application
-defaults (`vraptor`, `provisioning-admin`). Interactive configure offers
-`Remote API username [vraptor]:` on a fresh setup; Enter saves it. Explicit saved
-identities remain authoritative. `setup show --server-profile NAME` reports values
+defaults (role profile `provisioning-admin`; no remote API username). Configure
+`api_user` or pass `--api-user` before fetching or provisioning API credentials.
+Interactive configure leaves an unanswered fresh username unset. Existing API YAML
+can supply its own identity when no username is selected. Explicit saved identities,
+including explicitly selected legacy names, remain authoritative; change unwanted saved values explicitly.
+`setup show --server-profile NAME` reports values
 and sources. Without an explicit analyst path, the default is
 `~/.config/vraptor/analyst-agents.toml` (XDG-aware); the legacy `ai_skills` file
 migrates only when the destination is absent, preserving contents and permissions.
@@ -294,9 +298,19 @@ Resume retains saved target checks. An explicit selection replaces the previous
 selection; use the compatible `--environment-only-ok` flag to clear saved target
 checks and return to server-only verification. Dead-disk bindings are unchanged.
 
-Existing API YAML connects directly. For remote credential acquisition, supply
-`--server-ip` and explicitly select `--fetch-config`. Generation of missing
-API credentials additionally requires `--provision-api`. Endpoint YAML and
+Require explicit operator authorization before API-user creation or credential
+generation. A configured username or cached YAML does not authorize provisioning.
+Pass `--provision-api` only for explicitly authorized provisioning; honor
+no-provision, read-only and fetch-only scope.
+
+Existing API YAML can otherwise connect directly. For remote credential acquisition, supply
+`--server-ip` and explicitly select `--fetch-config`. `--provision-api` starts account setup before generating missing API credentials,
+including when operational YAML is cached. Generic installations prompt the
+operator to create/verify the account in the running server; continue or rerun
+with `--api-account-ready` only after completing that manual step. They have no
+built-in administrator API account. An explicitly configured remote bootstrap
+connection may automate this step; its identity is never used operationally.
+See the [shared account procedure](../velociraptor-live-api-client/references/service-account-config.md). Endpoint YAML and
 `--provision-client` apply to remote dead-disk setup below.
 `--force` refreshes the local copy when fetching is selected;
 `--regenerate-remote-api` explicitly replaces the selected remote API YAML.

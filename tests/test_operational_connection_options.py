@@ -338,7 +338,7 @@ def test_operational_defaults_ignore_files_environment_and_resolver(workstation,
     assert cli.main(["config", *view]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["view"] == "defaults"
-    assert payload["values"]["api_user"] == "vraptor"
+    assert "api_user" not in payload["values"]
     assert payload["values"]["velociraptor_bin"] == "~/velociraptor/velociraptor"
     assert set(payload["sources"].values()) == {"default"}
     assert str(workstation) not in json.dumps(payload)

@@ -361,6 +361,7 @@ def _toml(data: dict[str, Any]) -> str:
         "selection",
         "execution_defaults",
         "analysis_defaults",
+        "reporting",
         "connections",
         "profiles",
     ):
@@ -1001,12 +1002,15 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                 "A smaller saved/explicit context applies; use --model-context-tokens to change it.",
                 file=sys.stderr,
             )
+    def saved_budget(value, maximum):
+        return maximum if value == "max" else int(value)
+
     recommended_output = (
         reference.default_output_tokens
         if reference
         else 128_000
         if profile_action == "added" and provider in {"openai", "azure_openai"}
-        else int(analysis_defaults["max_output_tokens"])
+        else saved_budget(analysis_defaults["max_output_tokens"], output_maximum)
     )
     if not reference and configured_context and "max_output_tokens" not in profile:
         recommended_output = min(
@@ -1018,11 +1022,11 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     output_default = (
         recommended_output
         if automatic_budgets
-        else int(
+        else saved_budget(
             profile.get(
                 "max_output_tokens",
                 saved_analysis_defaults.get("max_output_tokens", recommended_output),
-            )
+            ), output_maximum
         )
     )
     budget_adjustments = {}
@@ -1061,7 +1065,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     input_default = (
         recommended_input
         if automatic_budgets
-        else int(
+        else saved_budget(
             profile.get(
                 "max_input_tokens",
                 saved_analysis_defaults.get(
@@ -1070,7 +1074,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                     if reference
                     else analysis_defaults["max_input_tokens"],
                 ),
-            )
+            ), input_maximum
         )
     )
     if reference and input_default < recommended_input and os.isatty(0):
@@ -1362,5 +1366,8 @@ def main(command: str, argv: list[str]) -> int:
         payload, status = setup(args), 0
     else:
         payload, status = asyncio.run(inspect_or_test(command, args))
+    from vraptor.logging import operations
+
+    payload.update(operations.correlation_metadata())
     print(json.dumps(payload, sort_keys=True, indent=2))
     return status
