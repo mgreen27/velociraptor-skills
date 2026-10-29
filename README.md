@@ -345,6 +345,11 @@ before changing installer, launcher or sync ownership.
 
 ## Validation
 
+`utils/check.sh setup` creates the development environment (editable install with
+test extras, ruff and the tokenizer cache). `utils/check.sh fast` runs ruff,
+`git diff --check`, the export validator and the core tests; `utils/check.sh full`
+runs the whole suite and keeps the log in `.local/check/`. The individual steps:
+
 ```sh
 ./utils/validate-public-export.py
 ./.venv/bin/python -m pip install -e '.[ai,azure,anthropic,claude,test]'
