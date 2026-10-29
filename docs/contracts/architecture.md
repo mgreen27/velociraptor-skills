@@ -1,8 +1,9 @@
 # Package boundary and installation
 
 The shared implementation lives under `src/vraptor`, grouped into `collect`,
-`analyze`, `hunt`, `autoruns`, `artifacts`, `agent`, `common` and `logging`. API transport, connection context and case-path resolution have
-small root modules. Runtime assets live together under `resources`.
+`analyze`, `hunt`, `autoruns`, `artifacts`, `agent`, `common` and `logging`. API
+transport, connection context and case-path resolution have small root modules.
+Runtime assets live together under `resources`.
 `common.sequences.unique_ordered` owns exact-value deduplication for collection,
 hunt and inventory callers, retaining first-seen order and their existing import
 names. Artifact-profile normalization remains separate because it strips values
@@ -12,11 +13,12 @@ readiness and hunt scope matching, retaining both existing module import names.
 Client-query label parsing remains separate because it returns a sorted list and
 discards empty scalar values.
 Use `vraptor`; `dfir` remains a legacy alias of the same `vraptor.cli:main`
-entry point, kept for compatibility. Both repository launchers use
-`utils/runtime-env.sh` only to select the interpreter and repository import paths.
-The `dfir` launcher strips an optional legacy `velociraptor` namespace and uses the
-same settings resolution as `./vraptor`. Operational commands still dispatch internally
-to `vraptor.legacy_cli` where needed. The removed case-management package is not required.
+entry point, kept for compatibility. The repository launchers only select the
+interpreter and import path; Python owns configuration and dotenv precedence.
+The `dfir` launcher strips an optional legacy `velociraptor` namespace and uses
+the same settings resolution as `./vraptor`. Operational commands still dispatch
+internally to `vraptor.legacy_cli` where needed. The removed case-management
+package is not required.
 
 `workspace.initialize` creates/reuses one investigation folder and missing
 `AGENTS.md` without connecting to a server. It returns bounded existing-analysis

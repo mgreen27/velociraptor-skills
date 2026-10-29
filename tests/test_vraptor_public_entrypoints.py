@@ -115,6 +115,25 @@ def test_package_finds_public_root_without_launcher(tmp_path):
     assert Path(result.stdout.strip()) == ROOT
 
 
+def test_installed_package_ignores_unrelated_vraptor_folders(tmp_path):
+    home, cwd = tmp_path / "home", tmp_path / "cwd"
+    package = home / ".local/venv/lib/site-packages/vraptor"
+    (package / "resources").mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    shutil.copy2(ROOT / "src/vraptor/resources/__init__.py", package / "resources")
+    cwd.mkdir()
+    # A checkout kept at ~/src/vraptor is not the repository of an installed copy.
+    (home / "src/vraptor").mkdir(parents=True)
+    env = {"PATH": os.environ["PATH"], "HOME": str(home),
+           "PYTHONPATH": str(package.parent), "PYTHONNOUSERSITE": "1"}
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "from vraptor.resources import repository_root; print(repository_root())"],
+        cwd=cwd, env=env, text=True, capture_output=True, check=True,
+    )
+    assert Path(result.stdout.strip()) == cwd.resolve()
+
+
 @pytest.mark.parametrize("placeholder", ["api_username", "your_api_user", "<api-user>"])
 def test_api_fetch_rejects_public_placeholders_before_connection(tmp_path, placeholder):
     script = ROOT / "src/vraptor/resources/scripts/velociraptor/fetch_live_api_client.sh"

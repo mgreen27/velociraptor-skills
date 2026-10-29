@@ -63,13 +63,3 @@ host/count limits, and binds compressed GoldenDB rule data. Normalization VQL is
 assembled by `autoruns.py`; native deduplication and regex matching are defined
 in the VQL file and executed by Velociraptor. Python validates and publishes the
 returned stacks.
-
-## Validation
-
-Run the focused no-AI contract tests from the repository root:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m pytest -q \
-  tests/test_analysis_skip_ai.py tests/test_autoruns_workflow.py \
-  tests/test_autoruns_dedup_ai.py
-```

@@ -455,3 +455,86 @@ def test_private_setup_routing_is_removed_before_policy_and_baseline(tmp_path):
     result = run(["python3", str(script), "to-ai", "--target", str(ai), "--working-tree", "--check"], public, expected=1)
     assert "conflict" in result.stdout
     assert private in source.read_text()
+
+
+def test_package_layout_paths_are_rewritten_and_compared_in_public_layout(tmp_path):
+    public, ai, script = initialize_pair(tmp_path)
+    (public / "config/sync-manifest.tsv").write_text(
+        "skills\tskills\ttree\npackages/vraptor/docs/reference\tdocs/reference\ttree\n"
+        "packages/vraptor/docs/contracts\tdocs/contracts\ttree\n"
+    )
+    skill, ref = ai / "skills/demo/SKILL.md", ai / "packages/vraptor/docs/reference/demo.md"
+    contract = ai / "packages/vraptor/docs/contracts/public-import.md"
+    for path in (skill, ref, contract):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(
+        "See [policy](../../packages/vraptor/docs/reference/demo.md) and "
+        "`packages/vraptor/src/vraptor/cli.py`.\nfrom packages.vraptor.tests.core import x\n"
+    )
+    ref.write_text(
+        "[setup](../../../../docs/setup.md) [cli](../contracts/cli.md) [config](../../../../CONFIG.md)\n"
+    )
+    contract.write_text("| `packages/vraptor/src/vraptor` | `src/vraptor` |\n")
+    commit_all(ai, "layout content")
+    commit_all(public, "layout mapping")
+    run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public)
+    assert (public / "skills/demo/SKILL.md").read_text() == (
+        "See [policy](../../docs/reference/demo.md) and `src/vraptor/cli.py`.\n"
+        "from tests.core import x\n"
+    )
+    imported_ref = "[setup](../setup.md) [cli](../contracts/cli.md) [config](../../CONFIG.md)\n"
+    assert (public / "docs/reference/demo.md").read_text() == imported_ref
+    assert (public / "docs/contracts/public-import.md").read_text() == contract.read_text()
+    commit_all(public, "import layout content")
+    result = run(["python3", str(script), "to-ai", "--target", str(ai), "--check"], public)
+    assert "unchanged=3" in result.stdout
+    # Reverse imports never guess at ai_skills package paths, including package
+    # doc links that leave the docs folder.
+    (public / "docs/reference/demo.md").write_text("[config](../../CONFIG.md) [cli](../contracts/cli.md)\n")
+    (public / "skills/demo/SKILL.md").write_text("Edited `src/vraptor/cli.py`.\n")
+    commit_all(public, "public layout edit")
+    before = skill.read_bytes(), ref.read_bytes()
+    result = run(["python3", str(script), "to-ai", "--target", str(ai), "--apply"], public, expected=2)
+    assert "manual port to ai_skills: packages/vraptor/docs/reference/demo.md" in result.stderr
+    (public / "docs/reference/demo.md").write_text(imported_ref)
+    commit_all(public, "restore reference")
+    result = run(["python3", str(script), "to-ai", "--target", str(ai), "--apply"], public, expected=2)
+    assert "manual port to ai_skills: skills/demo/SKILL.md" in result.stderr
+    assert (skill.read_bytes(), ref.read_bytes()) == before
+
+
+def test_tree_exclude_globs_skip_matching_files(tmp_path):
+    public, ai, script = initialize_pair(tmp_path)
+    (public / "config/sync-manifest.tsv").write_text("shared\tmanaged\ttree\t*.pdf, private/*\n")
+    (ai / "shared/private").mkdir()
+    (ai / "shared/guide.pdf").write_bytes(b"%PDF-1.7\n")
+    (ai / "shared/private/__init__.py").write_text('"""Local marker."""\n')
+    commit_all(ai, "excluded content")
+    commit_all(public, "exclude mapping")
+    result = run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public)
+    assert "add=1" in result.stdout
+    assert sorted(p.relative_to(public).as_posix() for p in (public / "managed").rglob("*")) == [
+        "managed/file.txt"
+    ]
+
+
+@pytest.mark.parametrize("row", ["a\tb\tfile\t*.pdf", "a\tb\ttree\t*.pdf,", "a\tb\ttree\t*\textra"])
+def test_invalid_exclude_rows_are_rejected(tmp_path, row):
+    public, ai, script = initialize_pair(tmp_path)
+    (public / "config/sync-manifest.tsv").write_text(row + "\n")
+    result = run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public, expected=2)
+    assert "sync-manifest.tsv:1" in result.stderr
+
+
+def test_dirty_excluded_source_does_not_block_committed_sync(tmp_path):
+    public, ai, script = initialize_pair(tmp_path)
+    (public / "config/sync-manifest.tsv").write_text("shared\tmanaged\ttree\tlocal/*\n")
+    commit_all(public, "exclude mapping")
+    (ai / "shared/local").mkdir()
+    (ai / "shared/local/notes.txt").write_text("uncommitted local notes\n")
+    run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public)
+    assert (public / "managed/file.txt").read_text() == "version one\n"
+    (ai / "shared/file.txt").write_text("dirty managed edit\n")
+    result = run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public, expected=2)
+    assert "managed source paths are dirty" in result.stderr
+    assert "shared/local" not in result.stderr

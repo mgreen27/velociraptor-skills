@@ -16,8 +16,8 @@ instructions and offline-only work retain their scope.
 The standalone `vraptor` CLI uses the same case paths and configuration. Use
 `vraptor analyze --flow F.ID --client C.ID --id ID` or
 `vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Operational routes from
-the former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
+client retries and GoldenDB uploads remain explicit. Operational routes from the
+former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
 
 Use the default full synthesis for normal analysis, including when Codex is the
 caller. Add `--synthesis none` only when preliminary-only analysis or caller-only

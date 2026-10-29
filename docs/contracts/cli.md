@@ -11,8 +11,8 @@ for `ai`. The advanced `setup`, `config`,
 
 Replace `<SERVER REFERENCE>` in examples with a saved connection name. Multiple
 servers can be configured in the same installation; each command selects one
-reference. `vraptor config` lists saved names in `connections`. See
-[multiple-server configuration](../../CONFIG.md#multiple-server-connections).
+reference. `vraptor config` lists saved names in `connections`. See the
+[server-profile and engagement context](../reference/velociraptor-engagement-context.md).
 
 ```sh
 vraptor ai config --view defaults

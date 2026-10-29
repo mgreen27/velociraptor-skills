@@ -8,9 +8,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_SCRIPT = (
-    REPO_ROOT / "src/vraptor/resources/scripts/prep_dfir_tools.sh"
-)
+SCRIPT_RELATIVE = Path("src/vraptor/resources/scripts/prep_dfir_tools.sh")
+SOURCE_SCRIPT = REPO_ROOT / SCRIPT_RELATIVE
 BASH = shutil.which("bash") or "/bin/bash"
 DIRNAME = shutil.which("dirname")
 MKDIR = shutil.which("mkdir")
@@ -22,9 +21,7 @@ class PrepDfirToolsShellTest(unittest.TestCase):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         repo_root = Path(temp_dir.name) / "ai-skills"
-        script_path = (
-            repo_root / "src/vraptor/resources/scripts/prep_dfir_tools.sh"
-        )
+        script_path = repo_root / SCRIPT_RELATIVE
         script_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(SOURCE_SCRIPT, script_path)
         return repo_root, script_path
@@ -87,8 +84,9 @@ class PrepDfirToolsShellTest(unittest.TestCase):
         env = dict(os.environ)
         for key in ("VELO_BIN", "AI_SKILLS_TOOLS_DATA_ROOT", "VELO_LOCAL_VERSION_TAG"):
             env.pop(key, None)
-        env["AI_SKILLS_REPO_ROOT"] = str(script_path.parents[4])
-        env["HOME"] = str(script_path.parents[5] / "home")
+        repo_root = script_path.parents[len(SCRIPT_RELATIVE.parts) - 1]
+        env["AI_SKILLS_REPO_ROOT"] = str(repo_root)
+        env["HOME"] = str(repo_root.parent / "home")
         if env_overrides:
             env.update(env_overrides)
         return subprocess.run(

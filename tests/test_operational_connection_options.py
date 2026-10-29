@@ -31,7 +31,7 @@ def write_settings(root, document):
 
 def test_example_env_preserves_saved_settings(workstation):
     root = workstation
-    example = Path(__file__).resolve().parents[1] / "config" / "example.env"
+    example = Path(__file__).resolve().parents[1] / "config/example.env"
     (root / ".env").write_text(example.read_text())
     write_settings(root, {
         "workstation": {"case_root": "~/custom-cases"},

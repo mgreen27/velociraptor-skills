@@ -188,7 +188,8 @@ def check_manifest(errors: list[str]) -> None:
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         fields = [field.strip() for field in raw.split("\t")]
-        if len(fields) != 3 or fields[2] not in {"file", "tree"}:
+        if (len(fields) not in {3, 4} or fields[2] not in {"file", "tree"}
+                or (len(fields) == 4 and (fields[2] != "tree" or not all(glob.strip() for glob in fields[3].split(","))))):
             errors.append(f"invalid manifest row: {MANIFEST.relative_to(REPO_ROOT)}:{number}")
             continue
         for label, value in (("source", fields[0]), ("target", fields[1])):

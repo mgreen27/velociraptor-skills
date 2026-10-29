@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import fnmatch
 import hashlib
 import json
 import os
@@ -23,6 +24,24 @@ from public_audit import append_audit, finding_metadata
 
 SCHEMA_VERSION = 1
 
+# ai_skills keeps the runtime under packages/vraptor; this repository is flat.
+# Comparisons and imports read ai_skills text through these rewrites.
+LAYOUT_REWRITES = (
+    (b"packages/vraptor/src/vraptor", b"src/vraptor"),
+    (b"packages/vraptor/tests/core", b"tests/core"),
+    (b"packages.vraptor.tests.core", b"tests.core"),
+    (b"packages/vraptor/docs/", b"docs/"),
+)
+# The import contract documents the mapping itself, so it keeps both layouts.
+LAYOUT_EXEMPT = {"packages/vraptor/docs/contracts/public-import.md"}
+PACKAGE_DOCS = "packages/vraptor/docs/"
+# Package docs link to the root docs folder and other repository-root targets
+# from four levels down in ai_skills and two levels down here.
+PACKAGE_DOCS_ROOT_LINKS = ((b"../../../../docs/", b"../"), (b"../../../../", b"../../"))
+PUBLIC_LAYOUT_TEXT = re.compile(rb"src/vraptor|tests/core|tests\.core|docs/(?:reference|contracts)/")
+# Any public package-doc link that leaves the docs folder depends on the layout.
+PUBLIC_DOCS_ROOT_LINK = re.compile(rb"\.\./(?!reference/|contracts/)")
+
 
 class SyncError(RuntimeError):
     pass
@@ -33,6 +52,7 @@ class Mapping:
     ai_path: str
     public_path: str
     kind: str
+    exclude: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,13 +118,16 @@ def load_manifest(path: Path) -> list[Mapping]:
         if not line or line.startswith("#"):
             continue
         fields = raw.split("\t")
-        if len(fields) != 3:
-            raise SyncError(f"{path}:{line_number}: expected three tab-separated fields")
+        if len(fields) not in {3, 4}:
+            raise SyncError(f"{path}:{line_number}: expected three or four tab-separated fields")
         ai_path = validate_relative_path(fields[0].strip(), "ai_skills")
         public_path = validate_relative_path(fields[1].strip(), "public")
         kind = fields[2].strip()
         if kind not in {"file", "tree"}:
             raise SyncError(f"{path}:{line_number}: kind must be file or tree")
+        exclude = tuple(glob.strip() for glob in fields[3].split(",")) if len(fields) == 4 else ()
+        if exclude and (kind != "tree" or not all(exclude)):
+            raise SyncError(f"{path}:{line_number}: exclude globs need a tree row and non-empty patterns")
         if ai_path in seen_ai or public_path in seen_public:
             raise SyncError(f"{path}:{line_number}: duplicate manifest path")
         for previous in mappings:
@@ -113,7 +136,7 @@ def load_manifest(path: Path) -> list[Mapping]:
                     raise SyncError(f"{path}:{line_number}: overlapping manifest paths")
         seen_ai.add(ai_path)
         seen_public.add(public_path)
-        mappings.append(Mapping(ai_path, public_path, kind))
+        mappings.append(Mapping(ai_path, public_path, kind, exclude))
     if not mappings:
         raise SyncError(f"manifest has no mappings: {path}")
     return mappings
@@ -252,18 +275,30 @@ def file_mode(path: Path) -> str:
     return "100755" if executable else "100644"
 
 
+def excluded(mapping: Mapping, suffix: str) -> bool:
+    return any(fnmatch.fnmatchcase(suffix, glob) for glob in mapping.exclude)
+
+
 def check_source_clean(repo: Path, mappings: Iterable[Mapping], direction: str) -> None:
-    paths = [m.ai_path if direction == "from-ai" else m.public_path for m in mappings]
+    roots = [(m.ai_path if direction == "from-ai" else m.public_path, m) for m in mappings]
     output = str(
         run_git(
             repo,
-            ["status", "--porcelain", "--untracked-files=all", "--", *paths],
+            ["status", "--porcelain", "--untracked-files=all", "--", *(root for root, _ in roots)],
             text=True,
         )
     )
-    if output.strip():
-        names = [line[3:] for line in output.splitlines()[:10]]
-        suffix = "" if len(output.splitlines()) <= 10 else " ..."
+    dirty = []
+    for line in output.splitlines():
+        path = line[3:]
+        if line.strip() and not any(
+            m.kind == "tree" and path.startswith(root + "/") and excluded(m, path[len(root) + 1:])
+            for root, m in roots
+        ):
+            dirty.append(path)
+    if dirty:
+        names = dirty[:10]
+        suffix = "" if len(dirty) <= 10 else " ..."
         raise SyncError(
             "managed source paths are dirty; commit them or use --working-tree: "
             + ", ".join(names)
@@ -334,6 +369,8 @@ def build_pairs(
                 raise SyncError(f"state path mapping mismatch: {ai_path} and {public_path}")
             suffixes.add(ai_suffix)
         for suffix in suffixes:
+            if excluded(mapping, suffix):
+                continue
             ai_path = join_mapping(mapping.ai_path, suffix)
             public_path = join_mapping(mapping.public_path, suffix)
             pair = Pair(pair_key(ai_path, public_path), ai_path, public_path)
@@ -355,6 +392,29 @@ def public_setup_content(path: str, data: bytes) -> bytes:
     return b"".join(line for line in lines if marker not in line)
 
 
+def public_layout_content(ai_path: str, data: bytes) -> bytes:
+    """Rewrite ai_skills package paths in text to this repository's layout."""
+    if b"\0" in data or ai_path in LAYOUT_EXEMPT:
+        return data
+    for old, new in LAYOUT_REWRITES:
+        data = data.replace(old, new)
+    if ai_path.startswith(PACKAGE_DOCS):
+        for old, new in PACKAGE_DOCS_ROOT_LINKS:
+            data = data.replace(old, new)
+    return data
+
+
+def ai_import_content(ai_path: str, value: FileValue) -> FileValue:
+    """Refuse to copy layout-dependent text into ai_skills without review."""
+    data = value.data
+    if b"\0" not in data and ai_path not in LAYOUT_EXEMPT and (
+        PUBLIC_LAYOUT_TEXT.search(data)
+        or (ai_path.startswith(PACKAGE_DOCS) and PUBLIC_DOCS_ROOT_LINK.search(data))
+    ):
+        raise SyncError(f"layout-dependent paths need a manual port to ai_skills: {ai_path}")
+    return value
+
+
 def read_optional(reader: Reader, path: str, mode: str | None) -> FileValue | None:
     if mode is None:
         return None
@@ -373,8 +433,11 @@ def plan_actions(
     actions: list[Action] = []
     for pair, ai_mode, public_mode in pairs:
         ai_value = read_optional(ai_reader, pair.ai_path, ai_mode)
-        if direction == "from-ai" and ai_value is not None:
-            ai_value = FileValue(public_setup_content(pair.ai_path, ai_value.data), ai_value.mode)
+        if ai_value is not None:
+            data = ai_value.data
+            if direction == "from-ai":
+                data = public_setup_content(pair.ai_path, data)
+            ai_value = FileValue(public_layout_content(pair.ai_path, data), ai_value.mode)
         public_value = read_optional(public_reader, pair.public_path, public_mode)
         source = ai_value if direction == "from-ai" else public_value
         target = public_value if direction == "from-ai" else ai_value
@@ -689,20 +752,28 @@ def main(argv: list[str] | None = None) -> int:
         raise SyncError("refusing to apply content that matches public deny patterns")
 
     # Preflight every destination before the first write, including resolved files.
+    writes: dict[str, FileValue] = {}
     for action in actions:
         destination = target_path(action.pair, args.direction, ai_repo, public_repo)
         if destination.is_symlink() or any(parent.is_symlink() for parent in destination.parents):
             raise SyncError(f"symlink is not permitted in destination path: {destination}")
         current = FileValue(destination.read_bytes(), file_mode(destination)) if destination.is_file() else None
+        if current is not None and args.direction == "to-ai":
+            current = FileValue(public_layout_content(action.pair.ai_path, current.data), current.mode)
         if current != action.target or (destination.exists() and not destination.is_file()):
             raise SyncError(f"destination changed during planning: {destination}")
+        if action.status in {"add", "update"}:
+            if action.source is None:
+                raise SyncError(f"internal error: missing source for {action.pair.key}")
+            writes[action.pair.key] = (
+                ai_import_content(action.pair.ai_path, action.source)
+                if args.direction == "to-ai" else action.source
+            )
 
     for action in actions:
         destination = target_path(action.pair, args.direction, ai_repo, public_repo)
         if action.status in {"add", "update"}:
-            if action.source is None:
-                raise SyncError(f"internal error: missing source for {action.pair.key}")
-            write_file(destination, action.source)
+            write_file(destination, writes[action.pair.key])
         elif action.status == "delete":
             if destination.exists() or destination.is_symlink():
                 if destination.is_dir():

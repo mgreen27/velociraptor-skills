@@ -485,9 +485,9 @@ def test_interactive_blank_remote_fields_preserve_saved_paths_and_other_profiles
 
 
 def test_templates_share_valid_generic_schema():
-    root = Path(__file__).resolve().parents[1]
-    for name in ("vraptor.example.toml",):
-        settings.read(root / "config" / name, required=True)
+    templates = Path(__file__).resolve().parents[1] / "config"
+    for path in (templates / "vraptor.example.toml", *sorted(templates.glob("vraptor-*.example.toml"))):
+        settings.read(path, required=True)
 
 
 @pytest.mark.parametrize("section", ["connection_defaults", "connections.lab"])

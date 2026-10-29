@@ -284,15 +284,6 @@ evidence. Database and matching-contract fingerprints prevent reuse of previous
 filtering results under changed rules. Local synthetic checks do not establish
 full-fleet coverage or performance.
 
-Run synthetic native-VQL, privacy/cache, saved-source, and database checks:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest \
-  tests/test_autoruns_dedup_ai.py \
-  tests/test_autoruns_regex.py tests/test_autoruns_unicode_contract.py \
-  tests/test_autoruns_approved_rules.py tests/test_autoruns_csv_db.py -q
-```
-
 Autoruns-only reports and CLI summaries omit the redundant `Target execution:
 not_assessed` label and its explanatory host-coverage bullet. Structured coverage
 state is retained unchanged. This field describes collection coverage against the
@@ -1195,15 +1186,6 @@ reuse is decided by current-case artifact, parameter and scope compatibility,
 not by the retired analysis tag;
 existing evidence and output directories are not rewritten. Earlier experimental
 exports still need to meet the production fingerprint contract before AI reuse.
-
-Run the profile, native query and host-path regression checks from the repository:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest \
-  tests/test_autoruns_workflow.py tests/test_autoruns_dedup_ai.py \
-  tests/test_collection_analysis.py \
-  tests/test_velociraptor_persistence_policy.py -q
-```
 
 ### Autoruns live stack count changes
 
