@@ -1378,6 +1378,9 @@ def bind_cli_destination(args: list[str]) -> Path | None:
         # Folder initialization determines whether a case exists. Creating its
         # log directory first would change initialized/reused semantics.
         return logger.bind_path(user_log_directory() / LOG_FILENAME)
+    if args[:1] in (["query"], ["clients"]):
+        # Instance-only commands accept --id as a server-profile alias, not a case.
+        return logger.bind_path(user_log_directory() / LOG_FILENAME)
     engagement_id = _cli_option(args, "--id", "--investigation-id", "--engagement-id")
     if engagement_id and SAFE_ENGAGEMENT_RE.fullmatch(engagement_id) and engagement_id not in {".", ".."}:
         from vraptor import settings

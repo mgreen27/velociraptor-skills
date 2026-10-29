@@ -31,7 +31,7 @@ or persisting any flows:
 Run the same exact capability-aware request with safe reuse:
 
 ```bash
-./dfir collection ensure \
+./dfir collect ensure \
   --id IR1234 \
   --client-id C.0123456789abcdef \
   --bundle ir-standard-live

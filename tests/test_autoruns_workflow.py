@@ -222,6 +222,8 @@ class AutorunsWorkflowTest(unittest.TestCase):
             self.assertFalse(result["automatic_missing_client_retries"])
             self.assertIsNone(result["hunts"][0]["retry_policy"])
             argv = result["analysis_follow_up"]["argv"]
+            # Installed console scripts reject the retired `velociraptor` namespace.
+            self.assertEqual(argv[:3], ["vraptor", "hunt", "analyze"])
             self.assertEqual(argv[argv.index("--profile") + 1], "autoruns")
             self.assertEqual(argv[argv.index("--hunt-id") + 1], "H.fixture")
             self.assertEqual(result["analysis_follow_up"]["required_options"], [])

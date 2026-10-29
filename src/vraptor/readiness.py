@@ -408,7 +408,7 @@ def verify_hostname_visible(config_path: Path, hostname: str, *, use_local_cli: 
         "os_info.fqdn AS Fqdn, "
         "timestamp(epoch=last_seen_at) AS LastSeen "
         f"FROM clients() WHERE os_info.hostname =~ '^{escaped}$' OR os_info.fqdn =~ '^{escaped}$' "
-        "ORDER BY LastSeen DESC LIMIT 1"
+        "ORDER BY LastSeen DESC"
     )
     query_fn = local_query if use_local_cli else remote_query
     rows = query_fn(config_path, query)
@@ -419,6 +419,14 @@ def verify_hostname_visible(config_path: Path, hostname: str, *, use_local_cli: 
             "hostname": hostname,
             "last_seen": "",
         }
+    # Match collection's get_client: a re-enrolled host must not pass readiness
+    # by silently picking the newest of several client IDs.
+    client_ids = sorted({str(row.get("client_id") or "").strip() for row in rows} - {""})
+    if len(client_ids) > 1:
+        raise RuntimeError(
+            f"Hostname {hostname!r} resolves to multiple Velociraptor clients "
+            f"({', '.join(client_ids)}). Use --client-id."
+        )
     row = rows[0]
     return {
         "target_visible": True,

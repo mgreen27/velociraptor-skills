@@ -969,7 +969,7 @@ def command_run(args: argparse.Namespace) -> dict[str, Any]:
         payload["automatic_missing_client_retries"] = False
         payload["analysis_follow_up"] = {
             "argv": [
-                "dfir", "velociraptor", "hunt", "analyze", "--profile", "autoruns",
+                "vraptor", "hunt", "analyze", "--profile", "autoruns",
                 "--engagement-id", investigation_id, "--api-client", str(api_client),
                 "--org-id", org_id, "--case-root", str(resolve_case_root(args)),
                 "--hunt-id", str(hunts[0]["hunt_id"]), "--artifact", artifacts[0],

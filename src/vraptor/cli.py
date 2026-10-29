@@ -237,6 +237,14 @@ The agent alias is supported; ai is the preferred command.""")
                 return 0
             if args.pop(0) != "prep":
                 raise ValueError("Unknown tools command; use tools prep")
+            if not {"-h", "--help"} & set(args):
+                # Analysis tokenizes evidence even without AI; cache the encoding
+                # now so later offline analysis works.
+                from vraptor.common import token_budget
+                try:
+                    token_budget.token_encoder()
+                except token_budget.TokenBudgetError as exc:
+                    print(f"[WARN]  {exc}", file=sys.stderr)
             from . import settings
             active = settings.current()
             env = dict(active.environment if active else os.environ, AI_SKILLS_REPO_ROOT=str(repository_root()))
