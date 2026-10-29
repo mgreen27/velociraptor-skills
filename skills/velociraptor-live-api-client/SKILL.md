@@ -13,7 +13,7 @@ DetectRaptor CSV row and verify installation before proceeding. Reuse a successf
 session check; a failed import blocks the workflow. Explicit read-only/no-import
 instructions and offline-only work retain their scope.
 
-Use the shared `vraptor` CLI (`dfir` is equivalent). Apply the shared
+Use the shared `vraptor` CLI. Apply the shared
 [operation authorization policy](../../docs/reference/velociraptor-operation-authorization.md)
 and [investigation context](../../docs/reference/velociraptor-engagement-context.md).
 
@@ -161,7 +161,7 @@ Use bounded read-only VQL unless a server mutation is explicitly authorized.
 Use the engagement-specific cached API client by id:
 
 ```bash
-dfir query \
+vraptor query \
   --server-profile lab \
   --vql "SELECT client_id, os_info.hostname AS Hostname FROM clients() LIMIT 10"
 ```
@@ -169,7 +169,7 @@ dfir query \
 Read a longer query from a file:
 
 ```bash
-dfir query \
+vraptor query \
   --server-profile lab \
   --vql-file /path/to/query.vql
 ```
@@ -177,7 +177,7 @@ dfir query \
 Pass VQL environment values without interpolating them into shell text:
 
 ```bash
-dfir query \
+vraptor query \
   --server-profile lab \
   --env HostRegex='^server-' \
   --vql "SELECT * FROM clients() WHERE os_info.hostname =~ HostRegex"
@@ -204,7 +204,7 @@ query.
 Find exact client details and labels by hostname or FQDN:
 
 ```bash
-dfir clients find \
+vraptor clients find \
   --server-profile lab \
   --name major
 ```
@@ -212,7 +212,7 @@ dfir clients find \
 Find by exact client id:
 
 ```bash
-dfir clients find \
+vraptor clients find \
   --server-profile lab \
   --client-id C.eeca51bbad4f01eb
 ```
@@ -220,7 +220,7 @@ dfir clients find \
 List all clients carrying an exact label:
 
 ```bash
-dfir clients list \
+vraptor clients list \
   --server-profile lab \
   --label investigation-scope \
   --limit 0
@@ -229,7 +229,7 @@ dfir clients list \
 Combine inventory filters:
 
 ```bash
-dfir clients list \
+vraptor clients list \
   --server-profile lab \
   --search 'srv|dc' \
   --os windows \

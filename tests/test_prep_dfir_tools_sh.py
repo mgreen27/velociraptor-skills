@@ -107,7 +107,7 @@ class PrepDfirToolsShellTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
         self.assertIn("Usage:", result.stdout)
-        self.assertIn("./dfir tools prep [OPTIONS]", result.stdout)
+        self.assertIn("./vraptor tools prep [OPTIONS]", result.stdout)
         self.assertIn("Prepare a specific component: venv | plaso | velociraptor | volatility | tsk | all", result.stdout)
         self.assertIn("--init-velociraptor-workspace", result.stdout)
 

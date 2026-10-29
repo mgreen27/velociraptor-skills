@@ -9,7 +9,7 @@
 #   - The Sleuth Kit / TSK  (https://github.com/sleuthkit/sleuthkit)
 #
 # Usage:
-#   ./dfir tools prep [OPTIONS]
+#   ./vraptor tools prep [OPTIONS]
 #
 # Options:
 #   -d <dir>   Override tool staging directory; Velociraptor appends /velociraptor/velociraptor
@@ -160,7 +160,7 @@ github_release_download_url() {
 usage() {
     printf '%s\n' \
         "Usage:" \
-        " ./dfir tools prep [OPTIONS]" \
+        " ./vraptor tools prep [OPTIONS]" \
         "" \
         "Options:" \
         " -d <dir>   Override tool staging directory; Velociraptor appends /velociraptor/velociraptor" \

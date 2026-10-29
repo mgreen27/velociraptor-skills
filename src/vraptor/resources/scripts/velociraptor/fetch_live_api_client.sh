@@ -69,7 +69,7 @@ expand_home_path() {
 usage() {
     cat <<'EOF'
 Usage:
-  ./dfir config fetch-api \
+  ./vraptor config fetch-api \
     --server-profile <profile> \
     [--server-ip <ip-or-host>] \
     [--output-path <local-path>] \

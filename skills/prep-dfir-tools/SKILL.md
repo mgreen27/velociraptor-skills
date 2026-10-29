@@ -16,7 +16,7 @@ vraptor tools prep [OPTIONS]
 ```
 
 Use the installed command from the activated environment below. In `ai_skills`,
-the repository launcher `./dfir` is also available. The implementation lives
+the repository launcher `./vraptor` is also available. The implementation lives
 under `packages/vraptor`. Keep this skill documentation-only.
 
 ## Install the Generic Package

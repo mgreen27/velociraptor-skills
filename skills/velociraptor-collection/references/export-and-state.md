@@ -84,7 +84,7 @@ not overwrite each other.
 Hydrate previously saved host requests with:
 
 ```bash
-dfir collect hydrate --investigation-id IR1234
+vraptor collect hydrate --investigation-id IR1234
 ```
 
 Use `--host` to restrict the target and `--force-export` only when a new snapshot is

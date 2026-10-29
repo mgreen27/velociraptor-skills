@@ -1,7 +1,7 @@
 # Prepare analysis without AI
 
-Add `--skip-ai` to `dfir hunt analyze` or
-`dfir collect analyze` (including host-analysis workflows).
+Add `--skip-ai` to `vraptor hunt analyze` or
+`vraptor collect analyze` (including host-analysis workflows).
 The switch bypasses AI credentials, model calls and semantic consolidation.
 It takes precedence over the default `--synthesis full` and any explicit
 `--synthesis` value. `--synthesis none` alone disables synthesis but still runs
@@ -34,10 +34,10 @@ a failed scan leaves the previous summary intact.
 operate on existing review state. Preparation covers the current selected scope.
 
 ```bash
-./dfir hunt analyze --id IR1234 --hunt-id H.EXAMPLE \
+./vraptor hunt analyze --id IR1234 --hunt-id H.EXAMPLE \
   --artifact IG.Windows.Sysinternals.Autoruns --profile autoruns --skip-ai
 
-./dfir collect analyze --id IR1234 --client-id C.EXAMPLE \
+./vraptor collect analyze --id IR1234 --client-id C.EXAMPLE \
   --request-id REQUEST_ID --question "Review persistence" --skip-ai
 ```
 

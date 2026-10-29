@@ -31,7 +31,7 @@ analysis remains entry-level and retains its original flow context; its GoldenDB
 reader also supports schemas 9 and 10.
 
 ```bash
-./dfir hunt analyze \
+./vraptor hunt analyze \
   --id IR1234 --hunt-id H.EXAMPLE \
   --artifact IG.Windows.Sysinternals.Autoruns \
   --profile autoruns \
@@ -250,7 +250,7 @@ by category (ignoring display anchors), preserving their order within each group
 Create or replace a database from the **complete** reviewed CSV:
 
 ```bash
-./dfir autoruns regex-build \
+./vraptor autoruns regex-build \
   --db /path/to/autoruns-golden.sqlite \
   --input /path/to/all-rules.csv \
   --backup-dir /path/to/backups/autoruns-golden \
@@ -563,7 +563,7 @@ checks and cannot write the schema-10 database.
 Refresh the RMM/remote-access classification:
 
 ```bash
-dfir autoruns refresh-rmm
+vraptor autoruns refresh-rmm
 ```
 
 ### Offline CSV review and repository update
@@ -664,7 +664,7 @@ also retains prohibited identities independently of the stored patterns;
 import validation is not a proof that a regex describes only benign software.
 
 ```bash
-./dfir autoruns import \
+./vraptor autoruns import \
   --input /path/to/reviews/exact-update.csv \
   --regex-input /path/to/reviews/regex-update.csv \
   --db src/vraptor/resources/golden/autoruns-golden.sqlite \
@@ -710,11 +710,11 @@ and delete only data rows that should not enter GoldenDB:
 cp <hunt>/analysis/autoruns_potential_golden.csv \
   /path/to/reviews/IR1234-H.1234-reviewed.csv
 
-dfir autoruns promote \
+vraptor autoruns promote \
   --input /path/to/reviews/IR1234-H.1234-reviewed.csv \
   --dry-run
 
-dfir autoruns promote \
+vraptor autoruns promote \
   --input /path/to/reviews/IR1234-H.1234-reviewed.csv
 ```
 
@@ -769,14 +769,14 @@ delta inspection or for recovery.
 Inspect and apply the completed delta:
 
 ```bash
-dfir autoruns inspect \
+vraptor autoruns inspect \
   --db <hunt>/analysis/autoruns-golden-delta.sqlite
 
-dfir autoruns apply \
+vraptor autoruns apply \
   --diff <hunt>/analysis/autoruns-golden-delta.sqlite \
   --dry-run
 
-dfir autoruns apply \
+vraptor autoruns apply \
   --diff <hunt>/analysis/autoruns-golden-delta.sqlite
 ```
 
@@ -799,7 +799,7 @@ For a live one-host collection, prefer the same server-side GoldenDB workflow
 used by hunts:
 
 ```bash
-dfir collect analyze \
+vraptor collect analyze \
   --id IR1234 \
   --host HOST01 \
   --collection-type persistence \
@@ -818,11 +818,11 @@ When immutable or offline evidence is required, collect and download the full
 Autoruns artifact. Keep that export unchanged, then filter it locally:
 
 ```bash
-dfir autoruns filter \
+vraptor autoruns filter \
   --manifest /path/to/velociraptor-collection-export-all.json
 ```
 
-`--manifest` is the JSON index written when `dfir collect export`
+`--manifest` is the JSON index written when `vraptor collect export`
 downloads finished collection results, or when `queue`, `ensure`, or `poll`
 is invoked with explicit `--export`. It records each exported artifact, row
 count, flow ID, and local CSV path. Use the `manifest_file` or
@@ -838,7 +838,7 @@ For a normal full machine collection, the path is typically:
 For example:
 
 ```bash
-dfir autoruns filter \
+vraptor autoruns filter \
   --manifest \
   /cases/IR1234/systems/HOST01/exports/velociraptor-collection-export-all.json
 ```
@@ -866,7 +866,7 @@ Send only the residual CSV to AI.
 Filter one downloaded CSV directly when no manifest is available:
 
 ```bash
-dfir autoruns filter \
+vraptor autoruns filter \
   --input /path/to/Windows.Sysinternals.Autoruns_full.csv \
   --output /path/to/autoruns-residual.csv
 ```
@@ -874,7 +874,7 @@ dfir autoruns filter \
 Query one row against the local database without changing it:
 
 ```bash
-dfir autoruns lookup \
+vraptor autoruns lookup \
   --image-path 'C:\Program Files\Vendor\app.exe' \
   --launch-string '"C:\Program Files\Vendor\app.exe" --background' \
   --signer '(Verified) Vendor'
@@ -883,7 +883,7 @@ dfir autoruns lookup \
 Build a database from reviewed VQL CSV, JSON, or JSONL rows:
 
 ```bash
-dfir autoruns build \
+vraptor autoruns build \
   --input /path/to/reviewed-autoruns.json \
   --exclude-hashes /path/to/suspicious-hashes.json \
   --output /path/to/autoruns-golden.sqlite
@@ -892,12 +892,12 @@ dfir autoruns build \
 Build a mergeable delta against one or more existing GoldenDB files:
 
 ```bash
-dfir autoruns build \
+vraptor autoruns build \
   --input /path/to/reviewed-autoruns.json \
   --baseline-db /path/to/current-golden.sqlite \
   --output /path/to/autoruns-golden-delta.sqlite
 
-dfir autoruns merge \
+vraptor autoruns merge \
   --input /path/to/current-golden.sqlite \
   --input /path/to/autoruns-golden-delta.sqlite \
   --output /path/to/autoruns-golden-next.sqlite
@@ -916,7 +916,7 @@ and stores one bounded Description per HashKey row. Category is not stored.
 Merge databases collected from multiple Velociraptor servers:
 
 ```bash
-dfir autoruns merge \
+vraptor autoruns merge \
   --input /path/to/server-a.sqlite \
   --input /path/to/server-b.sqlite \
   --output /path/to/merged.sqlite
@@ -925,13 +925,13 @@ dfir autoruns merge \
 Inspect or query when needed, then publish:
 
 ```bash
-dfir autoruns inspect --db /path/to/merged.sqlite
+vraptor autoruns inspect --db /path/to/merged.sqlite
 
-dfir autoruns lookup \
+vraptor autoruns lookup \
   --db /path/to/merged.sqlite \
   d45a537211ce08541a21a1e4fb343ea1fa652a25
 
-dfir autoruns push \
+vraptor autoruns push \
   --db /path/to/merged.sqlite \
   --api-client /path/to/api-client.yaml
 ```
@@ -961,7 +961,7 @@ used for publication and live inventory verification requires Velociraptor
 Retract a complete identity:
 
 ```bash
-dfir autoruns remove \
+vraptor autoruns remove \
   --hash d45a537211ce08541a21a1e4fb343ea1fa652a25
 ```
 
@@ -1167,11 +1167,11 @@ Example reviewed JSON input (the command requires paired quotes and `/service`):
 Create a baseline-bound delta and apply it using the normal workflow:
 
 ```bash
-./dfir autoruns build \
+./vraptor autoruns build \
   --regex-input /path/to/reviewed-regex-rules.json \
   --baseline-db /path/to/autoruns-golden.sqlite \
   --output /path/to/regex-delta.sqlite
-./dfir autoruns apply \
+./vraptor autoruns apply \
   --db /path/to/autoruns-golden.sqlite --diff /path/to/regex-delta.sqlite
 ```
 

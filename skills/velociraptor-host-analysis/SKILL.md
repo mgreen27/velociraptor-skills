@@ -16,8 +16,8 @@ instructions and offline-only work retain their scope.
 The standalone `vraptor` CLI uses the same case paths and configuration. Use
 `vraptor analyze --flow F.ID --client C.ID --id ID` or
 `vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Legacy `dfir`
-routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
+client retries and GoldenDB uploads remain explicit. Operational routes from
+the former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
 
 Use the default full synthesis for normal analysis. Only add `--synthesis none`
 when preliminary-only analysis or caller-only final review is requested. In that
@@ -57,7 +57,7 @@ Read [operating-contract.md](references/operating-contract.md), the shared [auth
    `--synthesis none`, or validated harness dispositions with `--synthesis full`,
    including one artifact/chunk.
 10. Export only on explicit request or evidential need, never to rescue analysis.
-11. Use skill contracts and documented `dfir --help`; do not inspect Python
+11. Use skill contracts and documented `vraptor --help`; do not inspect Python
     implementation to discover investigation workflow or CLI semantics.
 12. Never manually construct readiness manifests or poll a saved request without
     every required flow ID.
@@ -90,7 +90,7 @@ already validated matching analysis checkpoint may be reused.
 5. Run the canonical command once:
 
    ```bash
-   dfir collect analyze \
+   vraptor collect analyze \
      --investigation-id IR1234 \
      --server-profile lab7 \
      --client-id C.1234abcd \

@@ -20,7 +20,7 @@ session check; a failed import blocks the workflow. Explicit read-only/no-import
 instructions and offline-only work retain their scope.
 
 Prepare a durable investigation workspace, then prove Velociraptor readiness.
-`dfir` and `vraptor` use the same CLI. Initialization is standalone and does not
+Use the shared `vraptor` CLI. Initialization is standalone and does not
 contact a server or collect evidence.
 
 Read the [operation authorization policy](../../docs/reference/velociraptor-operation-authorization.md)
@@ -38,9 +38,9 @@ the operation requires one. Preserve the ID's spelling.
 Initialize once at the beginning of work:
 
 ```bash
-dfir setup init --id ir1234
+vraptor setup init --id ir1234
 # Or select a different investigations parent:
-dfir setup init --id ir1234 --case-root /investigations
+vraptor setup init --id ir1234 --case-root /investigations
 ```
 
 An explicit `--investigation-dir /investigations/ir1234` is also supported; its
@@ -140,13 +140,13 @@ and print JSON; defaults inspection ignores local files and environment override
 `setup show`. Use `setup configure` and `ai setup` to configure each subsystem.
 
 ```bash
-dfir setup configure
+vraptor setup configure
 # Targeted updates skip the interactive wizard and AI handoff:
-dfir setup configure --case-root ~/cases
-dfir setup configure --server-profile lab --api-client /configs/lab_api_client.yaml
-dfir setup show --server-profile lab
-dfir setup migrate --server-profile lab          # Preview legacy env migration
-dfir setup migrate --server-profile lab --write  # Apply nonconflicting settings
+vraptor setup configure --case-root ~/cases
+vraptor setup configure --server-profile lab --api-client /configs/lab_api_client.yaml
+vraptor setup show --server-profile lab
+vraptor setup migrate --server-profile lab          # Preview legacy env migration
+vraptor setup migrate --server-profile lab --write  # Apply nonconflicting settings
 ```
 
 The default file is `$XDG_CONFIG_HOME/vraptor/config.toml`, otherwise
@@ -187,8 +187,8 @@ mounted evidence and must not overwrite an evidence image; setup rejects these
 overlaps before creating the affected outputs.
 
 When setup includes the analyst agent, inspect the selected profile with
-`dfir ai config`, run `dfir ai setup` interactively to review/configure it,
-then rerun `dfir ai config` and `dfir ai doctor`. Carry the same operational
+`vraptor ai config`, run `vraptor ai setup` interactively to review/configure it,
+then rerun `vraptor ai config` and `vraptor ai doctor`. Carry the same operational
 `--settings-file`, analyst `--config-file` and `--execution-profile` selectors
 where explicitly selected. Reuse the intended provider/model and preserve shared
 analysis budgets. Configure this shared profile once across investigations;
@@ -216,7 +216,7 @@ Azure requires the deployment name. A native login check is not an inference or 
 
 `setup init` also checks repository `.env` and shared `~/.codex/.env` sources,
 reporting their paths, loading status and accepted key counts without values.
-It reuses the offline `dfir ai doctor` checks for the selected analyst config
+It reuses the offline `vraptor ai doctor` checks for the selected analyst config
 file/profile, provider, transport, model, credential presence, dependencies and
 analysis limits. Explicit process values retain precedence over repository and
 shared dotenv defaults; analyst TOML/harness selection follows the normal resolver.
@@ -225,11 +225,11 @@ An investigation-local `.env` is not a configuration source.
 Save/deploy/reset reusable operational settings with:
 
 ```bash
-dfir setup export --output ~/.config/vraptor/presets/current.toml
-dfir setup deploy --from ~/.config/vraptor/presets/current.toml
-dfir setup deploy --from ~/.config/vraptor/presets/current.toml --apply
-dfir setup reset
-dfir setup reset --apply
+vraptor setup export --output ~/.config/vraptor/presets/current.toml
+vraptor setup deploy --from ~/.config/vraptor/presets/current.toml
+vraptor setup deploy --from ~/.config/vraptor/presets/current.toml --apply
+vraptor setup reset
+vraptor setup reset --apply
 ```
 
 Export captures effective settings and all named connections without copying
@@ -247,7 +247,7 @@ Missing dotenv files are allowed when configuration comes from other sources.
 Invalid configuration, missing dependencies/credentials and disabled analysts are
 reported as needing attention. They do not prevent folder creation or reuse:
 exit 0 means initialization succeeded, even when configuration needs fixing.
-Use `dfir ai doctor` for diagnostics and `dfir ai setup` to configure the
+Use `vraptor ai doctor` for diagnostics and `vraptor ai setup` to configure the
 analyst, then rerun initialization or the doctor before analyst execution.
 
 Checks do not modify dotenv, analyst configuration or existing investigation
@@ -282,7 +282,7 @@ than blindly resubmitting a collection.
 ### Live remote
 
 ```bash
-dfir setup start --mode live-remote --id ir1234 --server-profile lab \
+vraptor setup start --mode live-remote --id ir1234 --server-profile lab \
   --api-client /configs/lab_api_client.yaml
 ```
 
@@ -335,7 +335,7 @@ See [extracted collection exports](../velociraptor-mapped-client/SKILL.md#extrac
 for mapping behavior and coverage limits.
 
 ```bash
-dfir setup start --mode local-deaddisk --id ir1234 \
+vraptor setup start --mode local-deaddisk --id ir1234 \
   --evidence-path /evidence/disk.E01
 ```
 
@@ -361,7 +361,7 @@ The additional credential is the matching endpoint YAML, needed to enroll the ma
 See [shared generation and manual fallback](../velociraptor-live-api-client/references/service-account-config.md).
 
 ```bash
-dfir setup start --mode remote-deaddisk --id ir1234 --server-profile lab \
+vraptor setup start --mode remote-deaddisk --id ir1234 --server-profile lab \
   --api-client /configs/lab_api_client.yaml \
   --client-config /configs/lab_client.config.yaml \
   --evidence-path /evidence/disk.E01 --hostname evidence-host
@@ -386,12 +386,12 @@ image. For example, put both local images in `test-local` and both remote images
 in `test-remote`, under the configured case root:
 
 ```bash
-dfir setup start --mode local-deaddisk --id test-local --mapping-id wkstn01 \
+vraptor setup start --mode local-deaddisk --id test-local --mapping-id wkstn01 \
   --evidence-path /evidence/wkstn01.E01 --hostname test-local-wkstn01
-dfir setup start --mode local-deaddisk --id test-local --mapping-id wkstn05 \
+vraptor setup start --mode local-deaddisk --id test-local --mapping-id wkstn05 \
   --evidence-path /evidence/wkstn05.E01 --hostname test-local-wkstn05
-dfir setup resume --id test-local --mapping-id wkstn01
-dfir setup status --id test-local --mapping-id wkstn05
+vraptor setup resume --id test-local --mapping-id wkstn01
+vraptor setup status --id test-local --mapping-id wkstn05
 ```
 
 The case shares one server/organization/API identity and, for managed local
@@ -408,10 +408,10 @@ selecting an exact host validates that host's own saved readiness independently.
 ### Resume, inspect and stop
 
 ```bash
-dfir setup status --id ir1234
-dfir setup resume --id ir1234
-dfir setup stop --id ir1234
-dfir setup stop --id ir1234 --stop-server
+vraptor setup status --id ir1234
+vraptor setup resume --id ir1234
+vraptor setup stop --id ir1234
+vraptor setup stop --id ir1234 --stop-server
 ```
 
 `status` inspects saved state and local process ownership; its `api_checked=false`
@@ -449,7 +449,7 @@ Then route the authorized request:
 - Cross-host scope: `velociraptor-hunting`.
 - One-host review: `velociraptor-host-analysis`.
 - Explicit acquisition: `velociraptor-collection` (`collect analyze` may collect).
-- Existing flow/request/hunt: `dfir analyze`, which cannot collect or retry clients.
+- Existing flow/request/hunt: `vraptor analyze`, which cannot collect or retry clients.
 
 See the [CLI contract](../../docs/contracts/cli.md).
 

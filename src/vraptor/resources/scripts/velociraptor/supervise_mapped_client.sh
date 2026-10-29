@@ -12,7 +12,7 @@ usage() {
         "   [max-restarts] [restart-window-seconds] [evidence-path] [foreground|nohup] [velociraptor-bin]" \
         "" \
         "Internal supervisor used by add_mapped_client.sh. Most operators should use:" \
-        " ./dfir mapped add-remote [OPTIONS] <evidence-path>"
+        " ./vraptor mapped add-remote [OPTIONS] <evidence-path>"
     exit 0
 }
 

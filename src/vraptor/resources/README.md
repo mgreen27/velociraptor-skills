@@ -26,12 +26,12 @@ immutable result through all phases. A source edit during a run is visible only
 to the next operation.
 
 ```bash
-./dfir artifacts policy validate
-./dfir artifacts policy show
-./dfir artifacts policy explain --artifact Windows.NTFS.MFT
-./dfir artifacts policy explain --scenario suspicious-binary-execution
-./dfir artifacts policy export --output /tmp/artifact-policy.json
-./dfir artifacts policy diff --against /tmp/artifact-policy.json --check
+./vraptor artifacts policy validate
+./vraptor artifacts policy show
+./vraptor artifacts policy explain --artifact Windows.NTFS.MFT
+./vraptor artifacts policy explain --scenario suspicious-binary-execution
+./vraptor artifacts policy export --output /tmp/artifact-policy.json
+./vraptor artifacts policy diff --against /tmp/artifact-policy.json --check
 ```
 
 `validate` returns compact hashes and counts. `show` includes ordered local

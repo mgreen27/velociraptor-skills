@@ -16,8 +16,8 @@ instructions and offline-only work retain their scope.
 The standalone `vraptor` CLI uses the same case paths and configuration. Use
 `vraptor analyze --flow F.ID --client C.ID --id ID` or
 `vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Legacy `dfir`
-routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
+client retries and GoldenDB uploads remain explicit. Operational routes from the
+former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
 
 Use this skill to expose local dead-disk evidence through Velociraptor without
 modifying the evidence source.
@@ -151,7 +151,7 @@ Do not silently substitute an unrelated `ir*` configuration.
 Install the binary when it is missing:
 
 ```bash
-dfir tools prep -t velociraptor
+vraptor tools prep -t velociraptor
 ```
 
 Do not request local GUI workspace initialization for a remote mapped client.
@@ -169,12 +169,12 @@ Reuse existing verified files when available. Fetch existing remote files only
 when requested, using an explicit server address and configured SSH identity:
 
 ```bash
-dfir config fetch-api \
+vraptor config fetch-api \
   --server-profile dfir \
   --server-ip 192.0.2.10 \
   --output-path ~/.config/velociraptor/dfir_api_client.yaml
 
-dfir config fetch-client \
+vraptor config fetch-client \
   --server-profile dfir \
   --server-ip 192.0.2.10 \
   --output-path ~/.config/velociraptor/dfir_client.config.yaml
@@ -189,7 +189,7 @@ does not authorize generation or replacement.
 Use the engagement setup command when a durable readiness manifest is required:
 
 ```bash
-dfir setup start --mode remote-deaddisk \
+vraptor setup start --mode remote-deaddisk \
   --evidence-path /path/to/evidence.E01 \
   --server-profile dfir \
   --engagement-id ir9005 \
@@ -201,7 +201,7 @@ dfir setup start --mode remote-deaddisk \
 For a managed local server using the same mapping lifecycle:
 
 ```bash
-dfir setup start --mode local-deaddisk --id ir9005 \
+vraptor setup start --mode local-deaddisk --id ir9005 \
   --evidence-path /path/to/evidence.E01
 ```
 
@@ -235,7 +235,7 @@ then fails closed unless all of the following are true:
 For lower-level mapping without the unified readiness manifest:
 
 ```bash
-dfir mapped add-remote \
+vraptor mapped add-remote \
   --api-client ~/.config/velociraptor/dfir_api_client.yaml \
   --client-config ~/.config/velociraptor/dfir_client.config.yaml \
   --workspace ~/.local/share/velociraptor-mapped \
@@ -249,9 +249,9 @@ dfir mapped add-remote \
 For a managed investigation:
 
 ```bash
-dfir setup status --id ir9005
-dfir setup resume --id ir9005
-dfir setup stop --id ir9005
+vraptor setup status --id ir9005
+vraptor setup resume --id ir9005
+vraptor setup stop --id ir9005
 ```
 
 `status` reports recorded readiness and local process state without an API query.
@@ -265,7 +265,7 @@ Evidence, remaps, writeback and datastore files are retained.
 For a lower-level mapping, inspect its explicit workspace and client:
 
 ```bash
-dfir mapped status \
+vraptor mapped status \
   --workspace ~/.local/share/velociraptor-mapped \
   --client evidence-host-dfir \
   --json

@@ -61,7 +61,7 @@ write_env_line() {
 usage() {
     printf '%s\n' \
         "Usage:" \
-        " ./dfir mapped add-remote [OPTIONS] <evidence-path>" \
+        " ./vraptor mapped add-remote [OPTIONS] <evidence-path>" \
         "" \
         "Options:" \
         " -n <name>  Override the mapped client hostname shown in Velociraptor" \
@@ -76,8 +76,8 @@ usage() {
         " -h         Show this help message" \
         "" \
         "Examples:" \
-        " ./dfir mapped add-remote --api-client api.yaml --client-config client.yaml /cases/disk.E01" \
-        " ./dfir mapped add-remote --api-client api.yaml --client-config client.yaml -n dead-disk-lab01 /mnt/windows" \
+        " ./vraptor mapped add-remote --api-client api.yaml --client-config client.yaml /cases/disk.E01" \
+        " ./vraptor mapped add-remote --api-client api.yaml --client-config client.yaml -n dead-disk-lab01 /mnt/windows" \
         ""
     exit 0
 }

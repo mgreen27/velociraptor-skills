@@ -19,7 +19,7 @@ analyze selects exactly one existing source: --flow (with --client/--host),
 It never collects, retries clients, uploads GoldenDB or publishes business state.
 Existing case paths and --id/--case-root/--server-profile remain supported.
 Use --server as a connection-profile alias; --profile selects analysis behavior.
-dfir is an equivalent entrypoint. Use setup init --id ID once to prepare a folder.
+dfir remains a legacy alias of the same entry point. Use setup init --id ID once to prepare a folder.
 To configure AI, run vraptor ai setup; agent is a compatible alias.
 Inspect settings with config or ai config; both accept --view effective|defaults.
 Use --grpc-max-message-bytes to override the shared API transport limit.
@@ -191,7 +191,7 @@ def _dispatch_main(argv=None):
         if command == "case":
             raise ValueError("Case management was removed. Use setup init --id ID, then setup and analysis commands.")
         if command == "velociraptor":
-            raise ValueError("The velociraptor namespace was removed. Use dfir <command> or vraptor <command>.")
+            raise ValueError("The velociraptor namespace was removed. Use vraptor <command>.")
         if command == "setup" and args[:1] == ["init"]:
             from vraptor.workspace import main as initialize
             return initialize(args[1:])

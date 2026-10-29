@@ -2,8 +2,9 @@
 
 ## AI token usage
 
-Operational `vraptor`/`dfir` commands share one operation logger, including saved
-synthesis, specialized analysis and `ai test`. Nested dispatch borrows the active
+Operational `vraptor` commands (and the legacy `dfir` alias of the same entry
+point) share one operation logger, including saved synthesis, specialized
+analysis and `ai test`. Nested dispatch borrows the active
 logger so it cannot duplicate accounting or finalize its parent's operation.
 The standalone `utils/run_analyst_agent.py` launcher uses the same lifecycle.
 Direct embedded Python use of the agent runner must provide an operation logger;
@@ -180,9 +181,9 @@ change query results, collection scope, deadlines or live process execution.
 ## Usage
 
 ```bash
-./dfir logs status --id case-example
-./dfir logs status --id case-example --operation op-v1-1111111111111111
-./dfir logs follow --id case-example --hunt-id H.example
+./vraptor logs status --id case-example
+./vraptor logs status --id case-example --operation op-v1-1111111111111111
+./vraptor logs follow --id case-example --hunt-id H.example
 ```
 
 `status` accepts `--case-root`, `--id`, `--operation`, and `--hunt-id`.

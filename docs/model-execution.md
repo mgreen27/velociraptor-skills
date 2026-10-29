@@ -12,7 +12,8 @@ Interactive `vraptor setup configure` offers the AI wizard after saving
 operational settings. Use `vraptor ai setup` directly to change AI profiles later.
 
 From this repository use `./vraptor ai ...`; installed users use
-`vraptor ai ...`. `./dfir ai config` remains the existing compatibility route.
+`vraptor ai ...`. `./dfir` remains a legacy alias of the same entry point, kept
+for compatibility.
 
 Run bare `vraptor setup configure` in a terminal and accept
 `Configure AI analyst settings [Y/n]:` to open the AI wizard after operational

@@ -76,7 +76,7 @@ queried fresh. Group analysis, successful or failed retry attempts, and ordinary
 status/polling callers retain fresh metadata reads; there is no persistent cache.
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --analysis-mode stack
@@ -86,7 +86,7 @@ Supply chat-derived field preferences when the operator wants the AI to assess
 a specific composite against the transient sample:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --analysis-mode stack \
@@ -344,7 +344,7 @@ approved filters.
 Rerun with the decisions:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --analysis-mode stack \
@@ -413,7 +413,7 @@ validation codes. The first failed attempt remains visible when a retry succeeds
 During execution these records are written immediately under `active_analysis`;
 at completion they are retained in the bounded `runs` entry.
 For targeted diagnosis on any live or snapshot hunt-analysis lane, add `--debug`. It atomically retains schema-3 value-free provider selection, configuration provenance, request-option presence, stage timing, usage, retries, HTTP status/error classification, validation failures, synthesis status, and the current operation id in `analysis/hunt-analysis-validation-debug.json`, capped at 512 attempt records and 1 MiB. Safe provider request IDs, known internal field names, and valid source references may be retained; unknown strings are hashed. Debug mode never enables prompt, model-output, raw-row, raw-stderr, raw-provider-payload, event-log, or runtime-file persistence. A later non-debug run preserves the last debug file but marks its reference as not current.
-All case-bound hunt commands append to the human-readable `<case-root>/<id>/logs/velociraptor-progress.log`; its `op-v1-*` id is shared with `DFIR-STATUS` and final structured output. Concurrent commands interleave safely under distinct operation ids and an adjacent mode-`0600` lock file serializes append and rotation with a bounded wait; logging failure never fails the hunt. Parallel task lifecycle events are unthrottled, API activity from worker threads remains correlated, and every operation ends with compact query/model/task/retry/row/batch/rotation/drop counts. INFO records bounded single-line sanitized server text and automatic numeric progress. Text may contain evidence-sensitive hostnames, usernames, paths, or VQL; recognized API keys, tokens, passwords, secrets, authorization values, URL credentials, PEM material, and configured credential values are redacted. Message length and SHA-256 are not logged. Queries have local `q-NNNN` ids and purposes; `response_rows` counts response records while `matched_rows` reports interpreted analysis counts. Unbounded queries, disk spills, and server silence are warned; silence is not proof of a remote stall. Unchanged queries receive five-minute reminders after initial wait/silence events. Set `VELO_PROGRESS_FILE_DEBUG=true`, or use analysis `--debug`, for batch/transport and provider detail. Use `logs status --id <id>` to check local process identity and retained operation overlaps; old logs without PID identity report `UNKNOWN`. Use `dfir logs show --id <id>` or `dfir logs follow --id <id>` with optional `--operation`, `--level`, `--since`, `--scope`, `--hunt-id`, and `--task-id` filters. Hunt status uses `hunt_flows()` metadata for aggregate collected-row counts rather than scanning `hunt_results()` with `count()`; per-artifact counts are emitted only for a single selected artifact, while multi-artifact counts remain `aggregate_only`.
+All case-bound hunt commands append to the human-readable `<case-root>/<id>/logs/velociraptor-progress.log`; its `op-v1-*` id is shared with `DFIR-STATUS` and final structured output. Concurrent commands interleave safely under distinct operation ids and an adjacent mode-`0600` lock file serializes append and rotation with a bounded wait; logging failure never fails the hunt. Parallel task lifecycle events are unthrottled, API activity from worker threads remains correlated, and every operation ends with compact query/model/task/retry/row/batch/rotation/drop counts. INFO records bounded single-line sanitized server text and automatic numeric progress. Text may contain evidence-sensitive hostnames, usernames, paths, or VQL; recognized API keys, tokens, passwords, secrets, authorization values, URL credentials, PEM material, and configured credential values are redacted. Message length and SHA-256 are not logged. Queries have local `q-NNNN` ids and purposes; `response_rows` counts response records while `matched_rows` reports interpreted analysis counts. Unbounded queries, disk spills, and server silence are warned; silence is not proof of a remote stall. Unchanged queries receive five-minute reminders after initial wait/silence events. Set `VELO_PROGRESS_FILE_DEBUG=true`, or use analysis `--debug`, for batch/transport and provider detail. Use `logs status --id <id>` to check local process identity and retained operation overlaps; old logs without PID identity report `UNKNOWN`. Use `vraptor logs show --id <id>` or `vraptor logs follow --id <id>` with optional `--operation`, `--level`, `--since`, `--scope`, `--hunt-id`, and `--task-id` filters. Hunt status uses `hunt_flows()` metadata for aggregate collected-row counts rather than scanning `hunt_results()` with `count()`; per-artifact counts are emitted only for a single selected artifact, while multi-artifact counts remain `aggregate_only`.
 The analyst prompt exposes `_SourceRef` as reference-only metadata. Analysts
 return canonical ATT&CK tactic names and one exact reference per `EVIDENCE` or
 `CONTEXT` line, never evidence values or field names. Python hydrates the

@@ -189,7 +189,7 @@ Examples:
 
 
 def collect_usage() -> str:
-    return """Usage: dfir collect <command> [args]
+    return """Usage: vraptor collect <command> [args]
 
 Normal analysis:
   analyze         Ensure exact flows and run flat artifact-scoped analysis
@@ -207,10 +207,10 @@ Collection operations:
   hydrate         Hydrate an explicit exported collection
 
 Examples:
-  dfir collect plan --id IR1234 --client-id C.1234abcd \
+  vraptor collect plan --id IR1234 --client-id C.1234abcd \
     --bundle ir-standard-live
-  dfir collect analyze --id IR1234 --client-id C.1234abcd
-  dfir collect analyze --id IR1234 --client-id C.1234abcd \\
+  vraptor collect analyze --id IR1234 --client-id C.1234abcd
+  vraptor collect analyze --id IR1234 --client-id C.1234abcd \\
     --artifact Windows.Forensics.Prefetch --question "Was tool.exe executed?"
 """
 
@@ -238,7 +238,7 @@ def _dispatch(args: list[str]) -> int:
     if area == "config":
         if not args or args[0] in {"-h", "--help", "help"}:
             print(
-                "Usage: dfir config "
+                "Usage: vraptor config "
                 "<fetch-api|fetch-client> [args]"
             )
             return 0
@@ -253,7 +253,7 @@ def _dispatch(args: list[str]) -> int:
     if area == "mapped":
         if not args or args[0] in {"-h", "--help", "help"}:
             print(
-                "Usage: dfir mapped "
+                "Usage: vraptor mapped "
                 "<add-remote|status> [args]"
             )
             return 0
@@ -277,9 +277,9 @@ def _dispatch(args: list[str]) -> int:
     if area == "artifacts":
         if not args or args[0] in {"-h", "--help", "help"}:
             print(
-                "Usage: dfir artifacts "
+                "Usage: vraptor artifacts "
                 "<inventory|linux-plan|policy|profiles|scenarios> [args]\n"
-                "       dfir artifacts validate-schema [args]"
+                "       vraptor artifacts validate-schema [args]"
             )
             return 0
         command = args.pop(0)

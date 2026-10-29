@@ -411,7 +411,7 @@ def command_for(
     analysis_inputs: dict[str, str],
 ) -> str:
     parts = [
-        "dfir",
+        "vraptor",
         "collect",
         action,
         "--investigation-id",
