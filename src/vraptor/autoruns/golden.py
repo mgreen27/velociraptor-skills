@@ -3482,23 +3482,6 @@ def parser() -> argparse.ArgumentParser:
     remove.add_argument("--category", default="", help=argparse.SUPPRESS)
     remove.add_argument("--rmm-reference")
 
-    test_build = commands.add_parser(
-        "test-build", help="Build an isolated autoruns_test database without changing production GoldenDB.",
-    )
-    test_build.add_argument("--source-db", required=True)
-    test_build.add_argument("--output", required=True, help="New operator-owned path; existing paths are never replaced.")
-    test_build.add_argument("--rmm-reference")
-    test_build.add_argument("--category-map", help="Optional exact-hash Category association JSON pinned to the source database.")
-
-    test_categories = commands.add_parser("test-categories", help="Recover observed categories by exact identity joins to legacy GoldenDB sources.")
-    test_categories.add_argument("--source-db", required=True)
-    test_categories.add_argument("--category-source", action="append", required=True)
-    test_categories.add_argument("--output", required=True, help="New category-map JSON path; existing paths are never replaced.")
-
-    test_review = commands.add_parser("test-review", help="Export grouped regex fields and descriptions, one identity per row.")
-    test_review.add_argument("--db", required=True)
-    test_review.add_argument("--output", required=True, help="New Markdown review path; existing paths are never replaced.")
-
     build = commands.add_parser("build")
     build.add_argument("--output", required=True)
     build.add_argument("--input", action="append", default=[])
@@ -3659,22 +3642,6 @@ def main(argv: list[str] | None = None) -> int:
                 if args.rmm_reference
                 else None
             ),
-        )
-    elif args.command == "test-categories":
-        from vraptor.autoruns import test_store as autoruns_test_db
-        result = autoruns_test_db.recover_categories(
-            Path(args.source_db), [Path(path) for path in args.category_source], Path(args.output),
-        )
-    elif args.command == "test-review":
-        from vraptor.autoruns import test_store as autoruns_test_db
-        result = autoruns_test_db.export_grouped_review(Path(args.db).expanduser().resolve(), Path(args.output))
-    elif args.command == "test-build":
-        from vraptor.autoruns import test_store as autoruns_test_db
-
-        result = autoruns_test_db.build_database(
-            Path(args.source_db), Path(args.output),
-            rmm_reference=Path(args.rmm_reference).expanduser().resolve() if args.rmm_reference else None,
-            category_map=Path(args.category_map).expanduser().resolve() if args.category_map else None,
         )
     elif args.command == "build":
         if not args.input and not args.regex_input:

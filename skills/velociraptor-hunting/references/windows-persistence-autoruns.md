@@ -64,7 +64,6 @@ identities at or below the cutoff enter GoldenDB matching, once per identity,
 with `ApplyMatching = TRUE`. Zero disables the cutoff. The full source scan,
 normalization, counting and bounded host sampling still occur for every eligible
 identity. This reduces matching work, not aggregation cost.
-Edits to `vql/autoruns_test/` do not change this pinned query.
 
 Python validates and transports the rules, checks complete-stream accounting,
 and orchestrates AI and reporting. It does not repeat GoldenDB matching over
@@ -289,7 +288,7 @@ Run synthetic native-VQL, privacy/cache, saved-source, and database checks:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest \
-  tests/test_autoruns_dedup_ai.py tests/test_autoruns_dedup_first.py \
+  tests/test_autoruns_dedup_ai.py \
   tests/test_autoruns_regex.py tests/test_autoruns_unicode_contract.py \
   tests/test_autoruns_approved_rules.py tests/test_autoruns_csv_db.py -q
 ```
@@ -703,6 +702,12 @@ git diff --check
 
 ### Deletion-only candidate promotion
 
+`autoruns stage` and `autoruns promote` accept only historical candidate files
+written by the retired general live hunt analysis, which carry the attestation
+metadata checked below. The `--profile autoruns` candidate CSV has no metadata
+and is rejected; add its reviewed rules through `regex-build` or `regex-import`
+as described in [regex-only database migration and updates](#regex-only-database-migration-and-updates).
+
 Preserve the canonical candidate file, copy it to any convenient review path,
 and delete only data rows that should not enter GoldenDB:
 
@@ -1016,24 +1021,11 @@ Individual-host analysis keeps its original flow context.
 
 ## Accounting and identity diagnostics
 
-The following legacy reducer checks are retained as internal regression and
-benchmark coverage, not as a selectable general hunt workflow. For the current
-profile, run `tests.test_autoruns_workflow`, `tests.test_autoruns_dedup_ai` and
-`tests.test_autoruns_dedup_first`; the validation command above covers the latter.
+The following legacy reducer checks are retained as internal regression
+coverage, not as a selectable general hunt workflow. For the current
+profile, run `tests.test_autoruns_workflow` and `tests.test_autoruns_dedup_ai`;
+the validation command above covers the latter.
 
-The general GoldenDB stack lane counts source, matched, residual, and populated
-residual rows and groups residual identities in **one source pass**. Matching
-checks exact hashes before paired regex rules. Only populated residual identities
-create individual bins; matched and blank residual rows each collapse into one
-accounting bucket. The server materializes these reduced aggregates, emits the
-accounting summary, streams deterministically ordered residual groups, then emits
-a completion marker. Memory therefore scales with residual identity cardinality,
-not all-source cardinality; large residual sets still require aggregate memory
-and may trigger native grouping/sort spill.
-
-Every group and the terminal marker must arrive, with exact represented-row and
-group-count equality. Malformed, duplicate, out-of-order, or incomplete streams
-fail validation. Same-pass count differences cannot be explained by hunt growth.
 Focused and direct-review accounting retain their existing scope-specific paths;
 focused separate-count stacks still allow growth with an explicit warning.
 
@@ -1074,36 +1066,11 @@ Missing selected identities still fail validation. INFO logs expose the stage
 and selected/matched/missing counts; DEBUG adds bounded opaque references and
 query timing. See [logging diagnostics](../../../docs/reference/velociraptor-logging.md#autoruns-diagnostics-and-timing).
 
-Run the synthetic pipeline integration tests and performance comparison with:
+Run the synthetic pipeline integration tests with:
 
 ```bash
 .venv/bin/python -m pytest -q tests/test_autoruns_accounted_stack.py tests/test_autoruns_request_batches.py tests/test_live_hunt_analysis.py tests/test_autoruns_ai_review.py
-.venv/bin/python -m tests.benchmark_autoruns_pipeline --rows 20000 --identities 200 --rules 20 --repeats 3
-.venv/bin/python -m tests.benchmark_autoruns_pipeline --rows 68000 --identities 34000 --rules 20 --repeats 3
 ```
-
-The benchmark compares separate scans, combined accounting/grouping, and an
-experimental grouping-before-matching query using synthetic rows and the bundled
-Velociraptor binary. Pre-grouping is not enabled in production: low-cardinality
-speedups alone do not justify retaining all-source identities when fleet
-cardinality is unknown. Report local time, RSS, and spill measurements separately
-from projected savings on remote source scans.
-
-Synthetic local measurements (2026-09-09, bundled binary, three repetitions;
-time is the median and RSS is the maximum child-process peak):
-
-| Source rows / identities | Residual groups | Separate scans | Combined pass | Pre-group experiment | Peak RSS: separate / combined / pre-group |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 20,000 / 200 | 21 | 9.171 s | 4.674 s | 1.154 s | 78.48 / 79.31 / 76.17 MiB |
-| 68,000 / 34,000 | 3,401 | 32.225 s | 16.408 s | 9.081 s | 90.94 / 88.52 / 179.61 MiB |
-
-Combined time fell 49.0–49.1% with comparable RSS. At high cardinality,
-pre-grouping doubled RSS relative to the combined pass and used 4.958 MiB of
-observed temporary data versus 0.454 MiB for combined and none for separate.
-Every high-cardinality pre-group repetition confirmed native `GROUP BY` spill at
-30,001 bins; aggregate materialization also spilled. Temporary-file peaks are sampled and
-may miss shorter-lived files. These measurements include local process startup
-and synthetic source I/O; they do not measure remote fleet runtime.
 
 Request planning with 166 synthetic Unicode identities and the full drill-down
 projection reduced two count-capped requests to one, from 39,274 to 24,493 total
@@ -1185,27 +1152,20 @@ lookup still describes exact identities. Build, merge, delta comparison, apply,
 and publication preserve regex rows and descriptions. Creating rules does not
 publish them; use the existing `push` workflow when publication is intended.
 
-VQL receives only the hash keys and paired image/launch patterns, compressed
-once at setup. Description and modification time stay in SQLite. The normal
-filter materializes both indexes and uses a lazy hash-first `if()` followed by
-`any()` over paired image/launch conditions. `any()` stops at the first matching
-rule; hash hits skip it entirely. All rules are eligible across categories.
-The hunt source is not rescanned for each rule. Existing focused-query and priority-override behaviour
-is unchanged. Rules are compiled/cached by the matching runtime; do not create
-patterns from row-specific values. Databases without regex rules generate the
-original hash-only query.
+Local and host filtering load the hash keys and paired image/launch patterns
+once. Description and modification time stay in SQLite. A hash hit skips the
+regex rules, and the first matching rule ends the check. All rules are eligible
+across categories. Rules are compiled once by the matching runtime; do not
+create patterns from row-specific values.
 
-Run local parity and lifecycle checks plus a synthetic VQL benchmark:
+Run local matching and lifecycle checks:
 
 ```bash
 .venv/bin/python -m unittest tests.test_autoruns_regex tests.test_autoruns_unicode_contract
-.venv/bin/python -m tests.benchmark_autoruns_regex --rows 10000 --rules 100 --repeats 3
 ```
 
-Native VQL tests use the bundled local Velociraptor binary and skip when it is
-unavailable. The benchmark requires that binary and measures exact hits, regex
-first/last hits and misses. It uses synthetic rows
-and makes no server queries or GoldenDB changes.
+Native VQL tests in the Unicode contract suite use the bundled local
+Velociraptor binary and skip when it is unavailable.
 
 ### Reference signer values and consolidation
 
@@ -1227,7 +1187,7 @@ case reviews directory outside the live hunt analysis tree. A path match alone
 is not proof of legitimate execution. Avoid generic directory-wide exclusions
 and unconstrained command interpreters.
 
-## Retired test workflow and retained development fixtures
+## Retired test workflow
 
 The counts-only `autoruns_test` hunt workflow and its CLI flags have been removed.
 Historical test hunt tags and local manifests remain recognizable. Collection
@@ -1236,27 +1196,16 @@ not by the retired analysis tag;
 existing evidence and output directories are not rewritten. Earlier experimental
 exports still need to meet the production fingerprint contract before AI reuse.
 
-Full experimental query versions remain in
-`vql/autoruns_test/` (experimental fixtures absent from this checkout) for synthetic local
-regressions and benchmarks. They cannot be selected through the production CLI.
-Internal experimental database builders and native test helpers retain historical
-schema/binding names; they are not additional hunt analysis profiles.
-
 Run the profile, native query and host-path regression checks from the repository:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest \
   tests/test_autoruns_workflow.py tests/test_autoruns_dedup_ai.py \
-  tests/test_autoruns_dedup_first.py tests/test_collection_analysis.py \
+  tests/test_collection_analysis.py \
   tests/test_velociraptor_persistence_policy.py -q
 ```
 
 ### Autoruns live stack count changes
-
-General GoldenDB Autoruns accounting and residual grouping share one source
-pass. Require exact row/group totals and the final stream marker before treating
-review as complete. See the [accounting and identity contract](#accounting-and-identity-diagnostics)
-for request-byte batching, memory limits, and synthetic validation.
 
 Focused Autoruns stacks compare the represented count with the earlier populated-row
 count. A higher count continues with all reviewed rows and logs a warning with
@@ -1266,3 +1215,5 @@ may reflect results arriving between live queries; the warning does not establis
 which clients contributed them. A lower count still fails accounting validation.
 This does not impose a row cap or sample results, and existing hunt-closure and
 review-coverage checks still apply.
+See the [accounting and identity contract](#accounting-and-identity-diagnostics)
+for request-byte batching and synthetic validation.

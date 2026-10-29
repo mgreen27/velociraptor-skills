@@ -118,7 +118,6 @@ requires one hunt, one Autoruns artifact and a schema-10 database (schema 9 rema
 directories are created automatically. The retired `autoruns_test` and `autoruns_dedup` profile names are
 rejected. For mixed hunts, select other artifacts separately. Completed host-free
 classifications are reusable from canonical hunt state after validation.
-Local VQL benchmark fixtures are retained for development only.
 
 For a supplied candidate Autoruns CSV targeting schema 6, use the [offline GoldenDB review workflow](references/windows-persistence-autoruns.md#offline-csv-review-and-repository-update): propose CSV updates, present them for review, and import approved additions locally. This branch needs no live readiness, case state, or API access; the live workflow below does not apply. The user can distribute the repository database update through a PR.
 
