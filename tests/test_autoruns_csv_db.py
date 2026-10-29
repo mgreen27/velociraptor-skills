@@ -122,7 +122,7 @@ def test_native_hunt_and_host_payload_keep_search_and_exact_category_semantics(t
     index = regex.RegexIndex(cfg["records"])
     assert [index.matches(r) for r in samples] == [True] * 3 + [False] * 4
     native = [row(Category=r["category"], image=r["image_path"], **{"Launch String": r["launch_string"], "Signer": r["signer"]}) for r in samples]
-    stream = execute(native, original=True, config=cfg, vql_file=dedup.template())
+    stream = execute(native, config=cfg, vql_file=dedup.template())
     assert stream[-1]["SourceRows"] == 7
     assert stream[-1]["MatchedRows"] == 3 and stream[-1]["ResidualRows"] == 4
     payload = golden.live_lookup_payload(path)

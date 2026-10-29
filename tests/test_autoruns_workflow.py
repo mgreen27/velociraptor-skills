@@ -1,5 +1,6 @@
 """Public Autoruns profile routing, retirement and collection isolation."""
 import contextlib
+import copy
 import io
 import json
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 from vraptor.agent.config import ResolvedAgentExecution, application_default_agent_route
 from vraptor.hunt import command as workflow
+from vraptor.hunt import operations as hunting
 from vraptor.autoruns import golden
 
 ARTIFACT = "IG.Windows.Sysinternals.Autoruns"
@@ -300,6 +302,31 @@ class AutorunsWorkflowTest(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "separate --group"):
                         workflow.command_run(args)
                     resolve.assert_not_called()
+
+
+class AutorunsProfileTest(unittest.TestCase):
+    def test_profile_resolves_real_collector_and_stable_marker(self):
+        request = hunting.build_request_for_profile("autoruns", validate_target=False)
+        self.assertEqual([s.artifact for s in request.expected_specs], ["IG.Windows.Sysinternals.Autoruns"])
+        tags = hunting.build_hunt_tags("ir-test", "autoruns", "sig", "windows")
+        self.assertTrue(hunting.is_autoruns_hunt({"tags": tags}))
+        self.assertTrue(hunting.is_autoruns_hunt({"hunt_description": hunting.build_hunt_description("ir-test", "autoruns", "sig", "windows")}))
+        self.assertFalse(hunting.is_autoruns_hunt({"hunt_description": "ordinary hunt question=autoruns"}))
+
+    def test_profile_and_ordinary_hunts_reuse_compatible_results(self):
+        request = hunting.build_request_for_profile("autoruns", validate_target=False)
+        base = {"hunt_id": "H.test", "state": "RUNNING", "tags": ["dfir-engagement:ir-test"],
+                "start_request": {"artifacts": ["IG.Windows.Sysinternals.Autoruns"], "os": "windows"}}
+        for target, tagged, allowed in (("autoruns", False, True), ("ordinary", True, True),
+                                        ("autoruns", True, True), ("ordinary", False, True)):
+            row = copy.deepcopy(base)
+            if tagged:
+                row["tags"].append("dfir-analysis:autoruns")
+            with self.subTest(target=target, tagged=tagged), mock.patch.object(hunting, "query_hunts", return_value=[row]):
+                matches = hunting.find_matching_hunts(object(), "ir-test", target, request, "windows", [], [])
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0]["reuse_allowed"], allowed)
+            self.assertEqual(matches[0]["selection_compatible"], allowed)
 
 
 if __name__ == "__main__":

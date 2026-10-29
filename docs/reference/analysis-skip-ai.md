@@ -62,8 +62,7 @@ inserts the source query and normalization expressions, substitutes rule and
 host/count limits, and binds compressed GoldenDB rule data. Normalization VQL is
 assembled by `autoruns.py`; native deduplication and regex matching are defined
 in the VQL file and executed by Velociraptor. Python validates and publishes the
-returned stacks. Development files under `vql/autoruns_test/` are not the
-production entry point.
+returned stacks.
 
 ## Validation
 

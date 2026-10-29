@@ -142,7 +142,7 @@ change query results, collection scope, deadlines or live process execution.
    a recorded terminal outcome. The reader flags logs older than six minutes
    and overlapping retained operations on the same command/target/artifact.
    It does not alter process execution or issue Velociraptor queries.
-2. **Query context.** Source, GoldenDB residual,
+2. **Query context.** Source, use-case scope,
    remaining-row, and populated-Autoruns counts have distinct purposes.
    Stack queries name scope, signature, aggregate, residual, or impacted-host
    work. API events inherit command and query scope so hunt filters include
@@ -228,13 +228,9 @@ git diff --check
 
 ### Autoruns diagnostics and timing
 
-General GoldenDB stack analysis uses `purpose=autoruns-accounted-stack` for one
-source pass producing source, matched, residual, populated-residual and group
-counts followed by the residual stack. `autoruns_accounting_completed` reports
-the summary and time spent acquiring it. Successful review requires exact
-row/group equality and the completion marker; successful transport alone does
-not establish complete review. Focused and direct lanes keep scope-specific
-accounting. Only separate-query stacks may explain an increased count as growth.
+Focused and direct lanes keep scope-specific accounting. A focused stack is
+counted and streamed by separate queries, so it may explain an increased count
+as growth; a stack that represents fewer rows than its count fails.
 
 INFO events distinguish accounting, AI review parts, suspicious drill-down
 batches, and validation. A drill-down completeness failure emits
@@ -261,13 +257,10 @@ existing failure events rather than a misleading completion summary.
 The review manifest and INFO `autoruns_review_timing` event separate
 `source_acquisition_seconds` from `model_execution_seconds`.
 `duration_seconds` remains total pipeline wall time (event `duration_ms` uses
-milliseconds), including time spent acquiring the combined query's summary
-before classification starts. Source acquisition measures iterator waits and
-that initial acquisition. Model execution measures the union of in-flight calls,
-including retries, rather than adding concurrent call durations. These intervals
-can overlap and must not be added; none is server CPU time. The combined query's
-initial acquisition also appears in its accounting event and must not be counted
-twice when interpreting logs.
+milliseconds). Source acquisition measures iterator waits. Model execution
+measures the union of in-flight calls, including retries, rather than adding
+concurrent call durations. These intervals can overlap and must not be added;
+none is server CPU time.
 
 Run the focused synthetic regressions with:
 

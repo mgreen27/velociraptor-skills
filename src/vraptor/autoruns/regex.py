@@ -66,24 +66,3 @@ class RegexIndex:
         return any(image.search(record["image_path"]) is not None
             and launch.search(record["launch_string"]) is not None
             for image, launch in self.rules)
-
-
-def vql_match_function() -> str:
-    """Use the same approved paired-rule semantics in inventory and live VQL."""
-    return ("LET AutorunsGoldenRegexMatch(GoldenImage, GoldenLaunch) = "
-        "any(items=AutorunsGoldenRegex, "
-        'filter="rule=>GoldenImage =~ rule.ImagePathRegex AND GoldenLaunch =~ rule.LaunchStringRegex")')
-
-
-def vql_preamble(*, source: str) -> str:
-    """Materialize approved paired rules once."""
-    return f"LET AutorunsGoldenRegex <= {source}\n" + vql_match_function()
-
-
-def vql_regex_only_preamble(*, source: str) -> str:
-    """A scalar rule array avoids SELECT materialization spill above 1,000 rules."""
-    return (f"LET AutorunsGoldenRegex <= {source}\n"
-        "LET AutorunsGoldenRegexOnlyMatch(GoldenCategory, GoldenImage, GoldenLaunch, GoldenSigner) = "
-        'any(items=AutorunsGoldenRegex, filter="rule=>GoldenCategory =~ rule.CategoryRegex '
-        'AND GoldenImage =~ rule.ImagePathRegex AND GoldenLaunch =~ rule.LaunchStringRegex '
-        'AND GoldenSigner =~ rule.SignerRegex")')

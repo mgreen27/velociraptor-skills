@@ -3313,9 +3313,6 @@ def command_analyze(args: argparse.Namespace) -> dict[str, Any]:
                     ),
                     indicators=list(args.indicator or []),
                     use_case=str(args.use_case or ""),
-                    # Only focused Autoruns scopes reach this shared legacy engine.
-                    autoruns_golden_disabled=True,
-                    autoruns_golden_sync=False,
                     autoruns_rmm_reference=(
                         Path(args.autoruns_rmm_reference)
                         .expanduser()

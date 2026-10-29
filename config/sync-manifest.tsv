@@ -66,12 +66,6 @@ tests/test_autoruns_csv_db.py	tests/test_autoruns_csv_db.py	file
 tests/test_autoruns_dedup_ai.py	tests/test_autoruns_dedup_ai.py	file
 tests/test_autoruns_regex_review.py	tests/test_autoruns_regex_review.py	file
 tests/test_autoruns_request_batches.py	tests/test_autoruns_request_batches.py	file
-tests/test_autoruns_signature.py	tests/test_autoruns_signature.py	file
-tests/test_autoruns_single_lru.py	tests/test_autoruns_single_lru.py	file
-tests/test_autoruns_test.py	tests/test_autoruns_test.py	file
-tests/test_autoruns_test_db.py	tests/test_autoruns_test_db.py	file
-tests/test_autoruns_test_grouped_runtime.py	tests/test_autoruns_test_grouped_runtime.py	file
-tests/test_autoruns_test_groups.py	tests/test_autoruns_test_groups.py	file
 tests/test_autoruns_workflow.py	tests/test_autoruns_workflow.py	file
 tests/test_analysis_skip_ai.py	tests/test_analysis_skip_ai.py	file
 tests/test_host_final_review.py	tests/test_host_final_review.py	file
