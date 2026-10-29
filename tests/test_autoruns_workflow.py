@@ -83,6 +83,7 @@ class AutorunsWorkflowTest(unittest.TestCase):
                  mock.patch.object(workflow, "resolve_agent_execution", side_effect=AssertionError("model")):
                 with self.assertRaisesRegex(RuntimeError, "--profile autoruns"):
                     workflow.command_analyze(args)
+            sync.assert_not_called()
 
     def test_live_command_uses_canonical_source_export_labels(self):
         for extra, expected in (((), 20), (("--stack-max-total-rows", "100"), 100),
@@ -179,6 +180,7 @@ class AutorunsWorkflowTest(unittest.TestCase):
             self.assertEqual(first["hunt_root"], second["hunt_root"])
             self.assertNotEqual(*[call.kwargs["output_dir"] for call in export.call_args_list])
             self.assertEqual(export.call_count, 2)
+            self.assertEqual(sync.call_count, 2)
 
 
 
@@ -254,6 +256,7 @@ class AutorunsWorkflowTest(unittest.TestCase):
                                    side_effect=AssertionError("review")):
                 with self.assertRaisesRegex(RuntimeError, "--profile autoruns"):
                     workflow.command_analyze(args)
+            sync.assert_not_called()
             self.assertEqual([path for path in (root / "cases").rglob("*") if path.is_file()], [])
 
     def test_local_group_reuse_depends_on_request_not_retired_profile(self):

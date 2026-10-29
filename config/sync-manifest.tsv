@@ -82,6 +82,7 @@ tests/test_generic_stack_review.py	tests/test_generic_stack_review.py	file
 tests/test_hunt_metadata_lookup.py	tests/test_hunt_metadata_lookup.py	file
 packages/vraptor/src/vraptor	src/vraptor	tree
 packages/vraptor/tests/core	tests/core	tree
+conftest.py	tests/conftest.py	file
 packages/vraptor/docs/contracts	docs/contracts	tree
 packages/vraptor/pyproject.toml	pyproject.toml	file
 # Additional standalone runtime dependencies and regression coverage
