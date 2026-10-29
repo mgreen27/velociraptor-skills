@@ -16,8 +16,8 @@ instructions and offline-only work retain their scope.
 The standalone `vraptor` CLI uses the same case paths and configuration. Use
 `vraptor analyze --flow F.ID --client C.ID --id ID` or
 `vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Legacy `dfir`
-routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
+client retries and GoldenDB uploads remain explicit. Operational routes from
+the former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
 
 Use the default full synthesis for normal analysis, including when Codex is the
 caller. Add `--synthesis none` only when preliminary-only analysis or caller-only
@@ -74,7 +74,7 @@ verify the saved analysis checkpoint, final review, and coverage before closing.
 Run one command:
 
 ```bash
-dfir collect analyze \
+vraptor collect analyze \
   --investigation-id IR1234 \
   --server-profile lab7 \
   --client-id C.1234abcd \
@@ -110,7 +110,7 @@ Client ID defaults to `all`; use one collection type or repeated artifacts.
 Resume saved flows after timeout; a missing flow ID requires a corrected new request:
 
 ```bash
-dfir collect analyze \
+vraptor collect analyze \
   --investigation-id IR1234 \
   --client-id C.1234abcd \
   --request-id REQUEST_ID \
@@ -129,7 +129,7 @@ Use `--rebuild-host-summary` to rebuild the cumulative host report from complete
 Inspect sizing without launching analyst agents:
 
 ```bash
-dfir collect analyze \
+vraptor collect analyze \
   --investigation-id IR1234 \
   --client-id C.1234abcd \
   --collection-type execution \
@@ -143,7 +143,7 @@ Configure reusable analyst profiles with `vraptor ai setup`, or accept the AI
 handoff in bare `vraptor setup configure`. No repository `.env` is required.
 Process environment and optional credential/dotenv files can override saved
 profiles. This compatibility example selects Codex-managed OpenAI routing;
-inspect effective values with `dfir ai config` before relying on saved settings:
+inspect effective values with `vraptor ai config` before relying on saved settings:
 
 ```dotenv
 AI_SKILLS_ANALYST_AGENT_ENABLED=true
@@ -160,8 +160,8 @@ app-server adapter requests a read-only, no-network, ephemeral turn and
 interrupts any observed tool, file, web, MCP, interaction, or subagent item.
 The token, row, and byte envelope is also shared. `CONFIG.md` is the prose
 overview; `config/example.env` lists optional override names,
-`dfir ai config --view defaults` reports machine-independent code defaults,
-and `dfir ai config` reports effective values and provenance.
+`vraptor ai config --view defaults` reports machine-independent code defaults,
+and `vraptor ai config` reports effective values and provenance.
 
 Saved TOML execution profiles configure OpenAI, Azure and Anthropic.
 Use `vraptor ai setup` and offline `vraptor ai doctor`; see
@@ -215,7 +215,7 @@ Before a new IR bundle, use the read-only resolution command when the operator
 needs to inspect capability and applicability without flow lookup or mutation:
 
 ```bash
-dfir collect plan \
+vraptor collect plan \
   --investigation-id IR1234 \
   --client-id C.1234abcd \
   --bundle ir-standard-live
@@ -243,7 +243,7 @@ option does not change endpoint execution, overall polling or model timeouts.
 Use only after evidence identifies an interval:
 
 ```bash
-dfir collect analyze \
+vraptor collect analyze \
   --investigation-id IR1234 \
   --client-id C.1234abcd \
   --collection-type timeline \
@@ -271,7 +271,7 @@ DEBUG adds response part/query IDs, server-reported totals, transport sizing,
 and provider lifecycle detail. The submitted VQL, evidence rows, prompts, model
 responses, environment values, provider bodies, and raw stderr remain excluded.
 Inspect with
-`dfir logs show --id <id>` or monitor with `dfir logs follow
+`vraptor logs show --id <id>` or monitor with `vraptor logs follow
 --id <id>`; both accept `--operation`, `--level`, `--since`, `--scope`,
 `--hunt-id`, and `--task-id`. Concurrent commands interleave safely under
 distinct operation ids. Parallel task lifecycle events are not throttled,
@@ -303,7 +303,7 @@ available/unavailable sets must partition the failed request exactly.
 Export only for immutable preservation, offline review, or interoperability:
 
 ```bash
-dfir collect export \
+vraptor collect export \
   --investigation-id IR1234 \
   --client-id C.1234abcd \
   --request-id REQUEST_ID \

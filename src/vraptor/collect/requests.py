@@ -4736,7 +4736,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Queue, inspect, or export per-artifact Velociraptor host collections.",
         epilog=(
             "For exact ensure/reuse, monitoring, and artifact-scoped analysis, use: "
-            "dfir collect analyze --id ID --client-id CLIENT "
+            "vraptor collect analyze --id ID --client-id CLIENT "
             "--collection-type TYPE --question QUESTION"
         ),
     )

@@ -52,7 +52,7 @@ verified Microsoft signer and argument-free launch constraints still apply.
 3. Dry-run a complete build from the repository root:
 
    ```bash
-   ./dfir autoruns regex-build \
+   ./vraptor autoruns regex-build \
      --db src/vraptor/resources/golden/autoruns-golden.sqlite \
      --input src/vraptor/resources/golden/autoruns-golden.csv \
      --backup-dir "$HOME/.local/share/dfir/autoruns-golden-backups" \

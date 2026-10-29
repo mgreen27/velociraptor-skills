@@ -1,6 +1,7 @@
 # CLI and existing-state contract
 
-`dfir` and `vraptor` are equivalent entrypoints. They expose `query`, `clients`, `artifacts`, `collect`, `analyze`, `hunt`,
+Use `vraptor`; `dfir` remains a legacy alias of the same entry point, kept for
+compatibility. The CLI exposes `query`, `clients`, `artifacts`, `collect`, `analyze`, `hunt`,
 `export`, `ai`, and `tools prep`. `agent` remains a compatible alias
 for `ai`. The advanced `setup`, `config`,
 `mapped`, `autoruns` and `logs` groups retain their existing lower-level commands.
@@ -108,7 +109,7 @@ artifact reports. See [reporting policy](../reference/reporting-policy.md) for
 priority ordering, configuration precedence, pagination and unavailable legacy
 examples. Caller-written assessments remain separate publications.
 
-Use `dfir setup init --id ir1234` once to create/reuse a standalone workspace.
+Use `vraptor setup init --id ir1234` once to create/reuse a standalone workspace.
 `--case-root` selects its parent; `--investigation-dir` accepts an exact folder
 ending in the ID. Existing `AGENTS.md` and investigation data are preserved.
 New guidance comes from the packaged
@@ -279,8 +280,8 @@ Setup lifecycle/configuration commands emit JSON; runtime failures return 1 and
 argument errors return 2.
 
 `dfir case` and the `dfir-case` executable have been removed. Installed
-entrypoints use the flat commands above. The checkout `./dfir velociraptor`
-launcher strips the old namespace and enters the same Python settings resolver. `collect analyze` may ensure
+entrypoints use the flat commands above. For compatibility, the checkout `./dfir`
+launcher strips the retired `velociraptor` namespace and enters the same Python settings resolver. `collect analyze` may ensure
 missing collections; `analyze` only selects existing evidence. Neither publishes
 case-management events.
 

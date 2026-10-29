@@ -310,14 +310,14 @@ Read only the references needed for the current branch:
 ### Grouped or Targeted Windows Hunt
 
 ```bash
-dfir hunt run \
+vraptor hunt run \
   --id IR1234 \
   --profile detectraptor \
   --task-mode compromise-assessment \
   --response-depth standard \
   --question "Find Windows compromise leads"
 
-dfir hunt run \
+vraptor hunt run \
   --id IR1234 \
   --artifact Windows.Search.FileFinder \
   --env 'Glob=C:\\ProgramData\\Vendor\\beacon.dll' \
@@ -336,7 +336,7 @@ source artifact set and parameters. To create a separate current-case hunt after
 explicit authorization:
 
 ```bash
-dfir hunt run \
+vraptor hunt run \
   --id IR1234 \
   --artifact IG.Windows.Sysinternals.Autoruns \
   --question "Review persistence" \
@@ -348,12 +348,12 @@ This flag never retargets or mutates the source template and never reuses its re
 ### Native Cross-Platform Check and Ensure
 
 ```bash
-dfir hunt native check \
+vraptor hunt native check \
   --investigation-id IR1234 \
   --target linux \
   --artifact Linux.Sys.Users
 
-dfir hunt native ensure \
+vraptor hunt native ensure \
   --investigation-id IR1234 \
   --target linux \
   --artifact Linux.Sys.Users
@@ -366,15 +366,15 @@ intentionally create a new exact run.
 ### Status and Live Analysis
 
 ```bash
-dfir hunt status \
+vraptor hunt status \
   --id IR1234 \
   --group DR-20260725T120000Z
 
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --group DR-20260725T120000Z
 
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --artifact DetectRaptor.Windows.Detection.Evtx
@@ -388,7 +388,7 @@ The verified matrix and source-specific roles are in [analysis-time-filter-suppo
 The coordinator holds one 5,000-row or 32 MiB logical segment, one partial token chunk, and at most the configured number of active analyst prompts. It releases each prompt and source-row validation map immediately after validation. To use fleet-prevalence stacking explicitly:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --analysis-mode stack
@@ -397,7 +397,7 @@ dfir hunt analyze \
 Apply a command-line indicator or approved filter reference when needed:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 \
   --hunt-id H.1234 \
   --analysis-mode stack \
@@ -417,7 +417,7 @@ Streamed queries include time spent paused for downstream analysis capacity.
 The option is rejected with `--snapshot`.
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --id IR1234 --hunt-id H.1234 \
   --artifact IG.Windows.Sysinternals.Autoruns \
   --query-timeout-seconds 1800
@@ -426,7 +426,7 @@ dfir hunt analyze \
 ### Missing-Client Retry
 
 ```bash
-dfir hunt retry-missing \
+vraptor hunt retry-missing \
   --id IR1234 \
   --hunt-id H.1234 \
   --after-hours 24 \
@@ -441,18 +441,18 @@ timestamps, not result rows.
 ### Explicit Evidence Extraction and Offline Review
 
 ```bash
-dfir hunt snapshot \
+vraptor hunt snapshot \
   --id IR1234 \
   --hunt-id H.1234
 
-dfir hunt analyze \
+vraptor hunt analyze \
   --snapshot /path/to/snapshot.json
 
-dfir hunt native export-results \
+vraptor hunt native export-results \
   --investigation-id IR1234 \
   --hunt-id H.1234
 
-dfir hunt native download-results \
+vraptor hunt native download-results \
   --investigation-id IR1234 \
   --hunt-id H.1234
 ```
@@ -464,7 +464,7 @@ explicit existing export/download manifest.
 ### Stop and Verify
 
 ```bash
-dfir hunt native stop \
+vraptor hunt native stop \
   --investigation-id IR1234 \
   --hunt-id H.1234
 ```

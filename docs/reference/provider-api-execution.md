@@ -178,7 +178,7 @@ AI_SKILLS_ANALYST_AGENT_REASONING_EFFORT=
 Omitted settings use the code-owned application defaults summarized in
 `CONFIG.md`. Set timeout, retry, or concurrency variables only as deliberate
 operator overrides, then inspect the effective values with
-`./dfir ai config`.
+`./vraptor ai config`.
 
 Provider variables:
 
@@ -247,7 +247,7 @@ Confirm that Codex is installed and signed in before analysis:
 ```bash
 codex --version
 codex login status
-./dfir ai config
+./vraptor ai config
 ```
 
 The config report should show
@@ -276,7 +276,7 @@ Direct-provider secrets come only from environment variables. Harness
 configuration supplies non-secret routing, never credentials. In app-server
 mode Codex owns its managed login and Python receives no secret value. Secret
 values are excluded from configuration representations, route identity,
-manifests, progress, diagnostics, and normalized exceptions. `./dfir ai
+manifests, progress, diagnostics, and normalized exceptions. `./vraptor ai
 config` exposes only source kind, variable or CLI name, source location,
 explicitness, credential variable names, configured booleans, and secret-header
 variable names/configured booleans.
@@ -339,9 +339,9 @@ wire_api = "responses"
 Inspect the resolved contract without making an API request:
 
 ```bash
-./dfir ai config --view defaults
-./dfir ai config
-./dfir ai config --config-source codex --codex-profile azure
+./vraptor ai config --view defaults
+./vraptor ai config
+./vraptor ai config --config-source codex --codex-profile azure
 ```
 
 The versioned JSON contains `execution`, `analysis_limits`,

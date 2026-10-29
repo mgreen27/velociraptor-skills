@@ -125,8 +125,8 @@ install the package with `python -m pip install -e .`; add `.[ai]`,
 `.[azure]`, `.[anthropic]`, or `.[claude]` for the selected provider.
 See [configuration](CONFIG.md) and the [installation and AI setup guide](docs/vraptor-installation.md).
 
-The root `vraptor` and `dfir` launchers select this checkout's source and `.venv`
-without activation. The installer adds the checkout to its `PATH` and saves a
+The root `vraptor` launcher (and its legacy `dfir` alias) selects this checkout's
+source and `.venv` without activation. The installer adds the checkout to its `PATH` and saves a
 guarded entry in your shell startup file if missing: `~/.zshrc` for zsh (respecting
 `ZDOTDIR`) or `~/.bashrc` for Bash, selected by `SHELL`. Open a new terminal after
 installation, or run the printed export in your existing terminal. For example:
@@ -134,7 +134,6 @@ installation, or run the printed export in your existing terminal. For example:
 ```sh
 export PATH="$HOME/git/velociraptor-skills:$PATH"
 vraptor --help
-dfir --help
 ```
 
 When `codex` is missing from PATH, the installer also detects the bundled CLI
@@ -186,8 +185,8 @@ export, reusable operational settings, three-mode setup, agent configuration
 and tool preparation. Top-level `analyze` consumes
 existing evidence and cannot submit collections, retry clients, upload GoldenDB
 or publish business case state. Explicit `collect analyze` retains its legacy
-collection behavior. `./dfir` accepts the same commands as `./vraptor`;
-`./dfir velociraptor` remains a compatibility entrypoint.
+collection behavior. Use `./vraptor`; `./dfir` remains a legacy alias of the same
+entry point.
 
 `setup init` creates investigation `AGENTS.md` files from the editable
 [Markdown template](src/vraptor/resources/templates/investigation-agents.md).

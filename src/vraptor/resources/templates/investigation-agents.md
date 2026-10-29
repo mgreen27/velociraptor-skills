@@ -11,9 +11,9 @@ At the end of each final response, include a compact usage footer:
 
 At session start, inspect `engagement.json` and reuse valid readiness; run `velociraptor-engagement-setup` only when missing, invalid, or affected by connection/credential/mapping changes or failures.
 Check shared/repository .env sources and effective analyst configuration once per session before analysis; reuse successful initialization/doctor checks already performed in this session.
-Repeat setup or `dfir ai doctor` only after relevant changes or failures, not before each collection. Keep the CLI's automatic per-operation identity, credential and target validation enabled.
+Repeat setup or `vraptor ai doctor` only after relevant changes or failures, not before each collection. Keep the CLI's automatic per-operation identity, credential and target validation enabled.
 Pass `--id {{investigation_id_arg}} --case-root {{case_root_arg}}` to operational commands.
-`dfir` and `vraptor` are equivalent. There is no global current investigation.
+Use `vraptor`; `dfir` remains a legacy alias of the same entry point. There is no global current investigation.
 Keep concurrent workstreams scoped to this folder and distinct hosts, hunts or requests.
 Reuse engagement.json, host/hunt reports and accepted checkpoints before acquiring evidence.
 Velociraptor is authoritative for server evidence; export raw evidence only when requested.

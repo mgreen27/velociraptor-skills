@@ -21,7 +21,7 @@ Replace `<SERVER REFERENCE>` below with the saved name and use that server's
 API-client YAML.
 
 ```bash
-./dfir setup start --mode live-remote \
+./vraptor setup start --mode live-remote \
   --server-profile "<SERVER REFERENCE>" \
   --id ir1234 \
   --api-client /secure/lab_api_client.yaml \

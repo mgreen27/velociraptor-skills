@@ -523,7 +523,7 @@ def shell_join(parts: list[str]) -> str:
 
 def review_command_base(row: dict[str, Any]) -> list[str]:
     return [
-        "dfir",
+        "vraptor",
         "hunt",
         "native",
         "review-results",

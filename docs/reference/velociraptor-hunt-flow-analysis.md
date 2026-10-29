@@ -80,7 +80,7 @@ analysis/run directory so accepted partition recovery is not silently lost.
 3. Run a full analysis to establish or replace the local checkpoint:
 
    ```bash
-   ./dfir hunt analyze \
+   ./vraptor hunt analyze \
      --id IR1234 \
      --hunt-id H.1234
    ```
@@ -89,7 +89,7 @@ analysis/run directory so accepted partition recovery is not silently lost.
    incremental update:
 
    ```bash
-   ./dfir hunt analyze \
+   ./vraptor hunt analyze \
      --id IR1234 \
      --hunt-id H.1234 \
      --update

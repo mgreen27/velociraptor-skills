@@ -16,8 +16,8 @@ instructions and offline-only work retain their scope.
 The standalone `vraptor` CLI uses the same case paths and configuration. Use
 `vraptor analyze --flow F.ID --client C.ID --id ID` or
 `vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Legacy `dfir`
-routes retain their behavior. See the [shared CLI contract](../../docs/contracts/cli.md).
+client retries and GoldenDB uploads remain explicit. Operational routes from
+the former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
 
 Use this skill before adding a new Velociraptor collection or hunt when the
 artifact choice is not already obvious.
@@ -80,18 +80,18 @@ This skill helps you:
    choosing between `velociraptor-hunting` and
    `velociraptor-host-analysis`.
 9. For a one-host Linux workflow, pass the saved JSON inventory to
-   `dfir artifacts linux-plan`. It validates the requested mode,
+   `vraptor artifacts linux-plan`. It validates the requested mode,
    focus, artifact names, and required parameters without starting collection.
 10. Reuse one case-level disposable cache at
    `<case_root>/<id>/.cache/velociraptor/artifacts`. Refresh or replace it instead
    of creating per-question directories. It is not evidence and must never become
    authoritative workflow state.
-11. Use this skill and documented `dfir artifacts --help`; do not
+11. Use this skill and documented `vraptor artifacts --help`; do not
     inspect Python implementation to infer inventory, profile, or CLI behavior.
 
 ## Server-capability recovery
 
-For `--bundle` or `--collection-group`, use `dfir collect plan`
+For `--bundle` or `--collection-group`, use `vraptor collect plan`
 first. The versioned policy resolves ordered alternatives from server inventory,
 records target-inapplicable sources, and continues recommended/optional gaps.
 A missing core source blocks a custom lane; a standard bundle marks that lane
@@ -110,7 +110,7 @@ artifact request fails server artifact preflight:
    time alone does not invalidate the preflight:
 
    ```bash
-   dfir artifacts inventory \
+   vraptor artifacts inventory \
      --api-client /path/to/api_client.yaml \
      --server-profile lab7 \
      --output-dir <case_root>/IR1234/.cache/velociraptor/artifacts \
@@ -295,7 +295,7 @@ Capability-gate these recommendations against the current
 Export the full catalog to a directory:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts
 ```
@@ -303,7 +303,7 @@ dfir artifacts inventory \
 Force a fresh recollection instead of reusing a matching prior export:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts \
   --force-run
@@ -312,7 +312,7 @@ dfir artifacts inventory \
 Export only likely EVTX-friendly artifacts:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts \
   --name-regex 'Evtx|EventLogs|DetectRaptor\\.Windows\\.Detection\\.Evtx' \
@@ -322,7 +322,7 @@ dfir artifacts inventory \
 Export hunt-oriented candidates with bounded-parameter interest:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts \
   --description-regex 'hunt|logon|event|service|file|registry' \
@@ -332,7 +332,7 @@ dfir artifacts inventory \
 Build a Windows hunt shortlist for a cross-host question:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts \
   --workflow hunt \
@@ -343,7 +343,7 @@ dfir artifacts inventory \
 Build a bounded timeline shortlist for post-analysis collection planning:
 
 ```bash
-dfir artifacts inventory \
+vraptor artifacts inventory \
   --api-client /path/to/api_client.yaml \
   --output-dir <case_root>/IR9001/.cache/velociraptor/artifacts \
   --workflow collection \
@@ -354,7 +354,7 @@ dfir artifacts inventory \
 Resolve a Linux standard-mode plan from the saved authoritative inventory:
 
 ```bash
-dfir artifacts linux-plan \
+vraptor artifacts linux-plan \
   --inventory <case_root>/IR9001/.cache/velociraptor/artifacts/artifact_definitions_inventory.json \
   --mode standard \
   --distro debian \
@@ -370,7 +370,7 @@ or parameter is unavailable and never emits `--force-run` or export actions.
 Validate the built-in reference plus configured site overlays:
 
 ```bash
-dfir artifacts profiles \
+vraptor artifacts profiles \
   validate \
   --artifact-reference /path/to/site/artifact-profiles.json
 ```
@@ -378,7 +378,7 @@ dfir artifacts profiles \
 Show one effective profile:
 
 ```bash
-dfir artifacts profiles \
+vraptor artifacts profiles \
   show \
   --artifact DetectRaptor.Windows.Detection.Evtx
 ```
@@ -386,7 +386,7 @@ dfir artifacts profiles \
 Export the resolved machine-readable reference and generated CSV index:
 
 ```bash
-dfir artifacts profiles \
+vraptor artifacts profiles \
   export \
   --output-dir /path/to/reference-review
 ```
@@ -394,40 +394,40 @@ dfir artifacts profiles \
 Validate the common detection scenarios:
 
 ```bash
-dfir artifacts scenarios validate
+vraptor artifacts scenarios validate
 ```
 
 List enabled scenarios:
 
 ```bash
-dfir artifacts scenarios list
+vraptor artifacts scenarios list
 ```
 
 Show one resolved scenario:
 
 ```bash
-dfir artifacts scenarios show \
+vraptor artifacts scenarios show \
   --scenario suspicious-service-creation
 ```
 
 Find scenarios that use an artifact:
 
 ```bash
-dfir artifacts scenarios for-artifact \
+vraptor artifacts scenarios for-artifact \
   --artifact Windows.System.Services
 ```
 
 Export resolved scenario JSON and CSV:
 
 ```bash
-dfir artifacts scenarios export \
+vraptor artifacts scenarios export \
   --output-dir /path/to/reference-review
 ```
 
 Apply a site scenario overlay:
 
 ```bash
-dfir artifacts scenarios validate \
+vraptor artifacts scenarios validate \
   --scenario-reference /path/to/site/detection-scenarios.json \
   --artifact-reference /path/to/site/artifact-profiles.json
 ```
@@ -435,22 +435,22 @@ dfir artifacts scenarios validate \
 Manage profiles and scenarios as one effective policy:
 
 ```bash
-dfir artifacts policy validate \
+vraptor artifacts policy validate \
   --artifact-reference /path/to/site/artifact-profiles.json \
   --scenario-reference /path/to/site/detection-scenarios.json
 
-dfir artifacts policy show
+vraptor artifacts policy show
 
-dfir artifacts policy explain \
+vraptor artifacts policy explain \
   --artifact Windows.NTFS.MFT
 
-dfir artifacts policy explain \
+vraptor artifacts policy explain \
   --scenario suspicious-binary-execution
 
-dfir artifacts policy export \
+vraptor artifacts policy export \
   --output /path/to/reference-review/artifact-policy-resolved.json
 
-dfir artifacts policy diff \
+vraptor artifacts policy diff \
   --against /path/to/reference-review/artifact-policy-resolved.json \
   --check
 ```

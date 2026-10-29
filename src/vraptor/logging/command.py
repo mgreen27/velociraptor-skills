@@ -258,7 +258,7 @@ def _add_read_args(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dfir logs",
+        prog="vraptor logs",
         description=__doc__,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -46,7 +46,7 @@ an investigation. Keep low-level `collect ensure` semantics collection-only.
 
 At session start before analysis, inspect shared/repository environment sources
 and effective analyst configuration. Reuse successful initialization/doctor checks
-already performed in that session. Repeat `dfir ai doctor` only after relevant
+already performed in that session. Repeat `vraptor ai doctor` only after relevant
 configuration/provider changes or failures, not before every collection. Reuse
 valid `engagement.json`; rerun setup only when readiness is missing, invalid, or
 affected by connection, credential, or mapping changes/failures. Automatic

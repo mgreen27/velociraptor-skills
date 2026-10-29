@@ -20,11 +20,11 @@ or download. Routine hunt analysis stays live and server-authoritative.
 ## Create and Analyze a Snapshot
 
 ```bash
-dfir hunt snapshot \
+vraptor hunt snapshot \
   --id IR1234 \
   --hunt-id H.1234
 
-dfir hunt analyze \
+vraptor hunt analyze \
   --snapshot /path/to/hunt-reviews/H.1234/snapshots/<snapshot>/snapshot.json \
   --artifact-reference /path/to/site/artifact-profiles.json
 ```
@@ -36,7 +36,7 @@ analysis files.
 Request derived output only when reusable derived products are required:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --snapshot /path/to/snapshot.json \
   --snapshot-output derived
 ```
@@ -58,7 +58,7 @@ CSV row across chunks.
 Selective review is explicit and incomplete by design:
 
 ```bash
-dfir hunt analyze \
+vraptor hunt analyze \
   --snapshot /path/to/snapshot.json \
   --review-mode selective \
   --max-total-analysis-tokens 120000 \
@@ -71,7 +71,7 @@ Use the saved-analysis manifest path only for evidence that was already
 extracted:
 
 ```bash
-dfir hunt analyze-saved \
+vraptor hunt analyze-saved \
   --export-manifest /path/to/exports/velociraptor-hunting-export.json \
   --download-manifest /path/to/downloads/velociraptor-hunting-download.json
 ```

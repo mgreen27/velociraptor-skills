@@ -1088,7 +1088,7 @@ def add_engagement_state_args(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Verify Velociraptor readiness. Prepare the folder separately with 'dfir setup init --id ID'."
+        description="Verify Velociraptor readiness. Prepare the folder separately with 'vraptor setup init --id ID'."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

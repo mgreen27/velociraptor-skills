@@ -90,7 +90,6 @@ run the printed export in your existing terminal. For example:
 ```sh
 export PATH="$HOME/git/velociraptor-skills:$PATH"
 vraptor --help
-dfir --help
 ```
 
 An installer subprocess cannot change its parent terminal's environment. The
@@ -105,7 +104,7 @@ at `/Applications/ChatGPT.app` and `~/Applications/ChatGPT.app` for an executabl
 `Contents/Resources/codex-cli/bin/codex` or `Contents/Resources/codex`.
 When found, the printed export includes
 both the repository and the bundled CLI directory, so one command enables
-`vraptor`, `dfir`, and `codex` in your terminal. Both directories are saved with
+`vraptor` and `codex` in your terminal. Both directories are saved with
 individual duplicate guards for future shells. An existing `codex` on PATH is
 preserved. Set `CHATGPT_APP=/custom/path/ChatGPT.app` to use a different location.
 If no CLI is found, the installer prints the
@@ -125,7 +124,7 @@ Keep the checkout available; moving it requires updating this entry and any
 installed skill links. Use `command -v vraptor` and `command -v dfir` to check for
 another installation taking precedence.
 
-You can also use `./vraptor` or `./dfir` from the checkout, their absolute paths,
+You can also use `./vraptor` from the checkout, its absolute path,
 or activate `.venv` with `source .venv/bin/activate` for that terminal.
 
 For an equivalent manual install, create a venv and run
@@ -153,8 +152,9 @@ add any missing provider extra to the same environment.
 
 With the repository on `PATH`, both root launchers work from other directories
 without activating the virtual environment or changing the working directory.
-`dfir` is an equivalent command. Installing Python dependencies does not install
-the native Velociraptor executable, start a server or link skills into a harness.
+Use `vraptor`; `dfir` remains a legacy alias of the same entry point.
+Installing Python dependencies does not install the native Velociraptor
+executable, start a server or link skills into a harness.
 
 ## 2. Configure Velociraptor and choose the AI handoff
 

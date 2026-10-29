@@ -3316,7 +3316,7 @@ def _paths(values: Iterable[str]) -> list[Path]:
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        prog="dfir autoruns",
+        prog="vraptor autoruns",
         description="Manage the reusable Autoruns GoldenDB.",
     )
     commands = root.add_subparsers(dest="command", required=True)
