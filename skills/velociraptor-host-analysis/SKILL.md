@@ -253,9 +253,16 @@ this inspection without model calls. Follow the shared
 [prompt export contract](../../docs/reference/chunk-prompt-debug.md).
 Queued/running
 status is in-memory only. A failed component does not block sibling artifacts and
-remains terminal until explicitly selected for reanalysis. Use repeatable
-`--reset-artifact NAME --request-id REQUEST_ID` or
-`--reset-analysis --request-id REQUEST_ID`; neither option recollects evidence.
+remains terminal until explicitly selected for reanalysis. Use
+`--retry-failed --request-id REQUEST_ID` to resume it with accepted chunks reused,
+or repeatable `--reset-artifact NAME --request-id REQUEST_ID` or
+`--reset-analysis --request-id REQUEST_ID` to discard accepted work; none of these
+recollects evidence. A chunk that fails every attempt is named in the summary
+(for example `chunk 71/71 rows 6901-7000 ... failed after 3 attempts`) and recorded
+value-free in the request's `analysis/failed-chunks.json`. After the operator reviews
+those rows, `--waive-failed-chunk KEY --waive-reason TEXT` publishes the accepted
+chunks with the gap named; never waive a chunk without that review. See
+[failed-chunk review](../../docs/reference/analysis-recovery.md#review-chunks-that-fail-every-attempt).
 
 The response includes structured `analysis_result` for automation and a bounded Markdown `chat_summary` with status, assessment, findings, finding-linked context, limitations, and next action; chat/GUI callers surface it without another model call.
 

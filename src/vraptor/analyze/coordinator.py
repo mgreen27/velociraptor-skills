@@ -61,6 +61,7 @@ from vraptor.logging import operations as operation_log
 
 
 STATE_FILENAME = "hunt-analysis-state.json"
+FAILED_CHUNKS_FILENAME = "hunt-failed-chunks.json"
 REPORT_FILENAME = "analysis-hunt.md"
 VALIDATION_DEBUG_FILENAME = "hunt-analysis-validation-debug.json"
 OUTPUT_CONTRACT = "validated-hunt-analysis-summary-v3"
@@ -1853,6 +1854,51 @@ def _compact_chunk_attempt_failure(
     return result
 
 
+def _cap_attempt_failures(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep terminal failures first under the cap, then report in chunk order."""
+    def order(item: dict[str, Any]) -> tuple[int, str, int]:
+        return int(item["ordinal"]), str(item["chunk_id"]), int(item["attempt"])
+
+    kept = sorted(records, key=lambda item: (item["status"] != "failed", *order(item)))
+    return sorted(kept[:MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN], key=order)
+
+
+def _manifest_references(manifest: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        key: str(manifest[key])
+        for key in ("first_reference", "last_reference")
+        if manifest.get(key)
+    }
+
+
+def _failed_chunk_review(outcome: Mapping[str, Any]) -> dict[str, Any]:
+    """Value-free review record, rebuilt from compact attempt codes if absent."""
+    if isinstance(outcome.get("review"), Mapping):
+        return dict(outcome["review"])
+    return recovery.task_diagnostics(
+        {
+            "stage": "chunk",
+            "status": "failed",
+            "attempts": int(outcome.get("attempts") or 0),
+            "attempt_history": [
+                {
+                    "attempt": item.get("attempt"),
+                    "status": item.get("status"),
+                    "diagnostics": [
+                        {"code": code} for code in item.get("diagnostic_codes") or []
+                    ],
+                    "run": {
+                        "status": "failed",
+                        "error_classification": str(item.get("failure_type") or ""),
+                    },
+                }
+                for item in outcome.get("attempt_failures") or []
+                if isinstance(item, Mapping)
+            ],
+        }
+    )
+
+
 def _bounded_chunk_attempt_failures(
     outcomes: Iterable[Mapping[str, Any]],
     manifests: Mapping[str, Mapping[str, Any]],
@@ -1896,18 +1942,11 @@ def _bounded_chunk_attempt_failures(
                     "artifact": str(manifest.get("artifact") or "unknown"),
                     "row_count": int(manifest.get("row_count") or 0),
                     "input_tokens": int(manifest.get("input_tokens") or 0),
+                    **_manifest_references(manifest),
                     **compact,
                 }
             )
-    records.sort(
-        key=lambda item: (
-            int(item["ordinal"]),
-            str(item["chunk_id"]),
-            int(item["attempt"]),
-        )
-    )
-    total = len(records)
-    return records[:MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN], total
+    return _cap_attempt_failures(records), len(records)
 
 
 def compact_persisted_evidence(state: dict[str, Any]) -> None:
@@ -2649,6 +2688,8 @@ def iter_streaming_chunk_work(
             "artifact": str(public_chunk["artifact"]),
             "row_count": int(public_chunk["row_count"]),
             "input_tokens": int(public_chunk["input_tokens"]),
+            "first_reference": next(iter(source_rows), ""),
+            "last_reference": next(reversed(source_rows), ""),
         }
         if on_chunk is not None:
             on_chunk(manifest)
@@ -2728,9 +2769,14 @@ async def _execute_streaming_chunk_work_async(
     final_error = "chunk analysis failed"
     final_diagnostics: list[dict[str, Any]] = []
     attempt_failures: list[dict[str, Any]] = []
+    # Raw outputs stay in this coroutine; only value-free review data leaves it.
+    review_history: list[dict[str, Any]] = []
+    attempt_prompts: list[str] = []
     correction_attempts = analysis_limits.correction_attempts(work.get(
         "correction_attempts", analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS))
     for attempt in range(1, correction_attempts + 2):
+        started_at = flow_analysis.now_utc()
+        attempt_prompts.append(task.prompt)
         run = None
         failure_type = "agent_failed"
         error_class = ""
@@ -2834,20 +2880,38 @@ async def _execute_streaming_chunk_work_async(
         # model request is only a semantic correction for a successful provider
         # response that failed deterministic output validation.
         retryable = attempt <= correction_attempts and failure_type == "validation_failed"
+        if final_error.startswith("Agent prompt exceeds maximum input tokens"):
+            failure_type = "input_limit"
         attempt_failures.append(
             _compact_chunk_attempt_failure(
                 attempt=attempt,
                 status="retrying" if retryable else "failed",
-                failure_type=(
-                    "input_limit"
-                    if final_error.startswith(
-                        "Agent prompt exceeds maximum input tokens"
-                    )
-                    else failure_type
-                ),
+                failure_type=failure_type,
                 error=final_error,
                 diagnostics=[*initial_diagnostics, *final_diagnostics],
             )
+        )
+        completed_run = run is not None and not inspect.isawaitable(run)
+        review_history.append(
+            {
+                "attempt": attempt,
+                "status": "retrying" if retryable else "failed",
+                "error": final_error,
+                "diagnostics": initial_diagnostics or final_diagnostics,
+                "started_at": started_at,
+                "completed_at": flow_analysis.now_utc(),
+                "run": (
+                    {"status": "failed", "error_classification": failure_type}
+                    if failure_type in {"executor_error", "input_limit"} or not completed_run
+                    else {
+                        "status": run.status,
+                        "error_classification": getattr(run, "error_classification", ""),
+                        "attempt_count": getattr(run, "attempt_count", 0),
+                        "elapsed_seconds": getattr(run, "elapsed_seconds", 0),
+                        "output": run.output,
+                    }
+                ),
+            }
         )
         if progress_callback is not None:
             progress_callback(
@@ -2857,13 +2921,7 @@ async def _execute_streaming_chunk_work_async(
                     "chunk_id": str(dict(work["manifest"])["chunk_id"]),
                     "attempt": attempt,
                     "status": "retrying" if retryable else "failed",
-                    "failure_type": (
-                        "input_limit"
-                        if final_error.startswith(
-                            "Agent prompt exceeds maximum input tokens"
-                        )
-                        else failure_type
-                    ),
+                    "failure_type": failure_type,
                     "error": final_error[:MAX_FAILED_CHUNK_ERROR_CHARS],
                     "diagnostics": initial_diagnostics or final_diagnostics,
                     "response_sha256": response_sha256,
@@ -2882,12 +2940,38 @@ async def _execute_streaming_chunk_work_async(
             output_name=base_task.output_name + f".retry-{attempt + 1}",
             metadata={**base_task.metadata, "attempt": attempt + 1},
         )
+    manifest = dict(work["manifest"])
+    record = {
+        "task_id": base_task.task_id,
+        "stage": "chunk",
+        "status": "failed",
+        "attempts": attempt,
+        "attempt_history": review_history,
+        "coverage": {
+            key: chunk[key]
+            for key in ("row_start", "row_end", "row_count", "task_chunk_index", "task_chunk_count")
+        },
+        "inputs": {
+            "input_sha256": recovery.fingerprint(base_task.prompt),
+            **{key: manifest[key] for key in ("ordinal", "input_tokens") if key in manifest},
+            **_manifest_references(manifest),
+        },
+    }
     outcome = {
         "status": "failed",
-        "chunk_id": str(dict(work["manifest"])["chunk_id"]),
+        "chunk_id": str(manifest["chunk_id"]),
         "attempts": attempt,
         "error": final_error[:MAX_FAILED_CHUNK_ERROR_CHARS],
         "attempt_failures": attempt_failures,
+        "review": recovery.task_diagnostics(record),
+        "evidence": prompt_debug.capture_failed_chunk(
+            key=str(manifest["chunk_id"]),
+            prompts=attempt_prompts,
+            record=record,
+            source_ids=sorted(
+                {str(row.get("_SourceId") or "") for row in source_rows.values()} - {""}
+            ),
+        ),
     }
     release_ephemeral_payload()
     return outcome
@@ -5001,6 +5085,7 @@ async def _analyze_hunt_flows_locked(
                     "artifact": str(manifest.get("artifact") or "unknown"),
                     "row_count": int(manifest.get("row_count") or 0),
                     "input_tokens": int(manifest.get("input_tokens") or 0),
+                    **_manifest_references(manifest),
                     **compact,
                 }
                 if debug_validation:
@@ -5019,14 +5104,7 @@ async def _analyze_hunt_flows_locked(
                             "status": "running",
                         }
                     )
-            ordered_failures = sorted(
-                active_attempt_failures.values(),
-                key=lambda item: (
-                    int(item["ordinal"]),
-                    str(item["chunk_id"]),
-                    int(item["attempt"]),
-                ),
-            )
+            ordered_failures = list(active_attempt_failures.values())
             persist_progress(
                 phase="chunk_analysis",
                 force=task_status in {"repaired", "retrying", "failed"},
@@ -5041,9 +5119,7 @@ async def _analyze_hunt_flows_locked(
                     0,
                     len(ordered_failures) - MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN,
                 ),
-                chunk_attempt_failures=ordered_failures[
-                    :MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN
-                ],
+                chunk_attempt_failures=_cap_attempt_failures(ordered_failures),
                 **(
                     {
                         "validation_debug": copy.deepcopy(
@@ -6055,8 +6131,36 @@ async def _analyze_hunt_flows_locked(
         target_execution=str(target_execution_coverage or "unknown"),
         source_hunt_state=str(hunt_state or "unknown"),
     )
+    failed_chunks_path = analysis_root / FAILED_CHUNKS_FILENAME
+    if failed_chunk_count or failed_chunks_path.is_file():
+        failed_chunk_ledger = recovery.FailedChunkLedger(
+            failed_chunks_path, {"kind": "hunt", "hunt_id": hunt_id, "org_id": org_id},
+        )
+        for chunk_id in accepted_results:
+            failed_chunk_ledger.resolve(chunk_id)
+        for chunk_id, outcome in sorted(failed_outcomes.items()):
+            failed_chunk_ledger.record_failure(
+                chunk_id,
+                _failed_chunk_review(outcome),
+                identity={
+                    "artifact": str(dict(emitted_chunks.get(chunk_id) or {}).get("artifact") or ""),
+                    "hunt_id": hunt_id,
+                    "chunk_id": chunk_id,
+                },
+                budget={
+                    "validation_correction_attempts": analysis_configuration.validation_correction_attempts,
+                    "provider_max_retries": spec.max_retries,
+                },
+                next_steps={
+                    "rerun": "Rerun the same hunt analysis command; hunt analysis has no "
+                    "chunk-level resume and reviews every chunk again.",
+                },
+                evidence=outcome.get("evidence"),
+            )
     if failed_chunk_count:
         run_record["status"] = "failed"
+        run_record["failed_chunks_file"] = str(failed_chunks_path)
+        run_record["failed_chunk_ids"] = sorted(failed_outcomes)[:MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN]
         completed_at = flow_analysis.now_utc()
         persist_progress(
             phase="failed",
@@ -6088,7 +6192,11 @@ async def _analyze_hunt_flows_locked(
         write_state(state_path, failure_state)
         raise RuntimeError(
             f"Hunt analysis failed closed: {failed_chunk_count} chunk(s) were not accepted. "
-            "No synthesis checkpoint or update cursor was advanced."
+            "No synthesis checkpoint or update cursor was advanced. "
+            f"Review {failed_chunks_path} (chunks: "
+            + ", ".join(sorted(failed_outcomes)[:10])
+            + (", ..." if failed_chunk_count > 10 else "")
+            + ")."
         )
 
     persist_progress(

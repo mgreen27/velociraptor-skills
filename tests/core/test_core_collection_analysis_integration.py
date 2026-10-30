@@ -7,6 +7,7 @@ import io
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -505,6 +506,100 @@ class CollectionAnalysisIntegrationTest(unittest.TestCase):
             self.assertFalse((request_analysis / "plan.json").exists())
             self.assertFalse((request_analysis / "run.json").exists())
             self.assertFalse((request_analysis / ".api-runtime").exists())
+
+    def test_exhausted_chunk_is_recorded_then_waived_after_review(self):
+        api = PaginatedFixtureApi(self.fixture, page_size=2)
+        payload = self.payload()
+        payload.update({"target_collection_type": "triage", "all_artifacts_expected_complete": True})
+        spec = ResolvedAgentExecution(route=ResolvedAgentRoute(
+            provider="openai", model="fixture-model", protocol="responses",
+            reasoning_effort="high", timeout_seconds=60, max_retries=2, max_concurrency=4,
+        ))
+        limits = replace(TEST_LIMITS, maximum_evidence_tokens_per_item=200)
+        calls: list[str] = []
+
+        def execute(task: AgentRequest) -> AgentResult:
+            calls.append(task.task_id)
+            chunk = dict(task.metadata["chunk"])
+            broken = chunk["artifact"] == "Artifact.Multi" and chunk["task_chunk_index"] == 1
+            return AgentResult(
+                task_id=task.task_id, status="succeeded",
+                output="PRIVATE_MODEL_OUTPUT" if broken else "RESULT\tno_reportable_findings\nEND",
+                output_file="", events_file="", manifest_file="", elapsed_seconds=0.01,
+            )
+
+        runner = mock.Mock()
+        runner.run.side_effect = lambda task, **_kwargs: execute(task)
+
+        def run(**overrides: Any) -> dict[str, Any]:
+            args = self.cli_args()
+            args.synthesis = "none"
+            for key, value in overrides.items():
+                setattr(args, key, value)
+            return asyncio.run(collection_analysis_cli.run_analysis_async(
+                api, args,
+                policy=collection_analysis_cli.artifact_policy.build_artifact_policy(profiles=self.profiles()),
+                limits=limits,
+            ))
+
+        with tempfile.TemporaryDirectory() as directory:
+            collection_analysis_cli.collection.CASE_ROOT = Path(directory)
+            with mock.patch.object(
+                collection_analysis_cli, "start_collection",
+                return_value=(self.fixture["hostname"], payload, "resumed_saved_request", None),
+            ), mock.patch.object(
+                collection_analysis_cli.collection_analysis_profiles, "profile_contract",
+                return_value={
+                    "analysis_profile": "fixture",
+                    "analysis_objectives": ["Answer the investigation question from accepted rows."],
+                    "artifact_strategies": {},
+                },
+            ), mock.patch.object(
+                collection_analysis_cli, "resolve_agent_execution", return_value=spec,
+            ), mock.patch.object(
+                collection_analysis_cli, "create_agent_runner", return_value=runner,
+            ):
+                first = run()
+                troubleshooting = first["analysis_result"]["troubleshooting"]
+                ledger_path = Path(troubleshooting["failed_chunks_file"])
+                ledger = json.loads(ledger_path.read_text())
+                [(key, entry)] = ledger["chunks"].items()
+                self.assertEqual(
+                    (entry["artifact"], entry["status"], entry["attempts"]),
+                    ("Artifact.Multi", "failed", 3),
+                )
+                self.assertEqual(entry["inputs"]["task_chunk_index"], 1)
+                self.assertEqual(entry["inputs"]["task_chunk_count"], 2)
+                self.assertIn("--waive-failed-chunk", entry["next"]["waive"])
+                self.assertNotIn("PRIVATE_MODEL_OUTPUT", ledger_path.read_text())
+                self.assertEqual([item["key"] for item in troubleshooting["failed_chunks"]], [key])
+                self.assertEqual(calls.count(entry["task_id"]), 3)
+
+                with self.assertRaisesRegex(RuntimeError, "--waive-reason"):
+                    run(waive_failed_chunk=[key])
+                second = run(
+                    waive_failed_chunk=[entry["task_id"]],
+                    waive_reason="Rows reviewed manually in Velociraptor",
+                )
+                self.assertEqual(calls.count(entry["task_id"]), 3)
+                waived = json.loads(ledger_path.read_text())["chunks"][key]
+                self.assertEqual(waived["status"], "waived")
+                self.assertEqual(waived["decision"]["reason"], "Rows reviewed manually in Velociraptor")
+                state = json.loads(Path(second["host_state_file"]).read_text())
+                multi = state["artifacts"]["Artifact.Multi"]
+                self.assertEqual(multi["result_status"], "complete_with_failures")
+                self.assertEqual(
+                    (multi["result"]["coverage"]["accepted_chunks"], multi["result"]["coverage"]["planned_chunks"]),
+                    (1, 2),
+                )
+                self.assertIn(
+                    "chunk 2/2 rows 4-7 (S0001-R4..S0003-R3) waived by operator, not analysed",
+                    second["chat_summary"],
+                )
+                self.assertEqual(
+                    [item["status"] for item in second["analysis_result"]["troubleshooting"]["failed_chunks"]],
+                    ["waived"],
+                )
 
 
 if __name__ == "__main__":

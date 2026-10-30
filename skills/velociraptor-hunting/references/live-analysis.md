@@ -478,8 +478,10 @@ All case-bound hunt commands append to the human-readable `<case-root>/<id>/logs
 The analyst prompt exposes `_SourceRef` as reference-only metadata. Analysts
 return canonical ATT&CK tactic names and one exact reference per `EVIDENCE` or
 `CONTEXT` line, never evidence values or field names. Python hydrates the
-authoritative row after validation. Final prose fields consume embedded tabs; fixed structural fields remain strict. Invalid output receives one bounded retry
-and is never mechanically rewritten into an accepted result.
+authoritative row after validation. Final prose fields consume embedded tabs; fixed structural fields remain strict. Invalid output receives bounded
+correction attempts (two by default, three calls in total) and is never mechanically
+rewritten into an accepted result. A chunk that fails every attempt is recorded
+value-free in `hunt-failed-chunks.json`; the error names the file and chunk IDs.
 A failed chunk or hard synthesis failure leaves the prior checkpoint and cursor
 unchanged. When every chunk is accepted but final narrative synthesis fails
 deterministic validation, publish the grounded `complete_with_failures` fallback

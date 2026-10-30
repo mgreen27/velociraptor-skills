@@ -8,7 +8,9 @@ The limit is shared across artifacts and hunts selected by that command. Under
 concurrency, selection follows render order, not artifact or source-row order.
 
 This option is separate from `--debug`, which remains value-free provider and
-validation diagnostics. Prompt exports contain the exact question, instructions,
+validation diagnostics. To keep raw material only for chunks that fail every
+attempt, use `--keep-failed-chunk-evidence` instead; see
+[failed-chunk review](analysis-recovery.md#review-chunks-that-fail-every-attempt). Prompt exports contain the exact question, instructions,
 output grammar and projected evidence in the analysis prompt. Treat them as
 case evidence. Responses are saved exactly as returned by the analyst runner,
 before any validation or normalization, including malformed responses. Provider

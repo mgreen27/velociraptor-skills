@@ -703,6 +703,7 @@ async def _validated_pool_async(
     schedule: Callable[[AgentRequest, Callable[[AgentRequest], Any]], Any] | None = None,
     correction_attempts: int = analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS,
     accepted_callback: Callable[[AgentRequest, dict[str, Any]], None] | None = None,
+    failed_callback: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     correction_attempts = analysis_limits.correction_attempts(correction_attempts)
     accepted: dict[str, dict[str, Any]] = {}
@@ -734,10 +735,23 @@ async def _validated_pool_async(
         dict[str, Any] | None, dict[str, Any]
     ]:
         attempt_history: list[dict[str, Any]] = []
+        attempt_prompts: list[str] = []
         correction_defects: list[dict[str, Any]] = []
         current_task = base_task
         debug_index = prompt_debug.track_task(base_task)
+        inputs = {
+            "input_sha256": recovery.fingerprint(base_task.prompt),
+            **dict(base_task.metadata.get("chunk_inputs") or {}),
+        }
+
+        def failed(record: dict[str, Any]) -> tuple[None, dict[str, Any]]:
+            if failed_callback is not None:
+                failed_callback(base_task, record, attempt_prompts)
+            return None, record
+
         for attempt in range(1, correction_attempts + 2):
+            started_at = now_utc()
+            attempt_prompts.append(current_task.prompt)
             result = await execute_safely(current_task)
             prompt_debug.response(
                 debug_index, attempt=attempt, prompt=current_task.prompt,
@@ -781,6 +795,8 @@ async def _validated_pool_async(
                     "error": error,
                     "diagnostics": diagnostics,
                     "run": asdict(result),
+                    "started_at": started_at,
+                    "completed_at": now_utc(),
                 }
             )
             record = {
@@ -796,6 +812,7 @@ async def _validated_pool_async(
                     key: value for key, value in dict(base_task.metadata.get("chunk") or {}).items()
                     if key in {"row_start", "row_end", "row_count", "task_chunk_index", "task_chunk_count"}
                 },
+                "inputs": inputs,
             }
             if on_progress is not None:
                 on_progress(
@@ -817,7 +834,9 @@ async def _validated_pool_async(
                 )
             if normalized is not None and accepted_callback is not None:
                 accepted_callback(base_task, normalized)
-            if normalized is not None or not retryable:
+            if normalized is None and not retryable:
+                return failed(record)
+            if normalized is not None:
                 return normalized, record
             if retryable:
                 correction_defects.extend(diagnostics)
@@ -850,14 +869,14 @@ async def _validated_pool_async(
                                 "diagnostics": diagnostics,
                             }
                         )
-                    return None, record
+                    return failed(record)
                 current_task = replace(
                     base_task,
                     prompt=retry_prompt,
                     output_name=base_task.output_name + f".retry-{attempt + 1}",
                     metadata={**base_task.metadata, "attempt": attempt + 1},
                 )
-        return None, record
+        return failed(record)
 
     def collect(task: AgentRequest, outcome: tuple[dict[str, Any] | None, dict[str, Any]]) -> None:
         normalized, record = outcome
@@ -1550,8 +1569,15 @@ async def execute_analysis_workload_async(
     perform_scope_synthesis: bool = True,
     schedule: Callable[[AgentRequest, Callable[[AgentRequest], Any]], Any] | None = None,
     chunk_recovery: recovery.ChunkRecovery | None = None,
+    chunk_failed: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
+    chunk_waiver: Callable[[AgentRequest], str | None] | None = None,
 ) -> dict[str, Any]:
-    """Execute chunk, artifact-synthesis, then host-synthesis stages."""
+    """Execute chunk, artifact-synthesis, then host-synthesis stages.
+
+    ``chunk_failed`` receives each chunk that exhausted its attempts.
+    ``chunk_waiver`` returns an operator's reason for a chunk that must not be
+    sent again; that chunk becomes a named coverage gap.
+    """
     if not question.strip():
         raise ValueError("investigation question cannot be empty")
 
@@ -1614,6 +1640,12 @@ async def execute_analysis_workload_async(
             metadata={
                 "stage": "chunk",
                 "chunk": chunk,
+                "chunk_inputs": {
+                    "flow_id": chunk.get("flow_id"),
+                    "input_tokens": chunk.get("input_tokens"),
+                    "first_reference": next(iter(source_rows_by_index[index]), ""),
+                    "last_reference": next(reversed(source_rows_by_index[index]), ""),
+                },
                 "analysis_routing": analysis_limits.stage_routing("chunk"),
             },
         )
@@ -1657,6 +1689,20 @@ async def execute_analysis_workload_async(
                         "attempts": 0, "reused": True, "attempt_history": [],
                     }
                     continue
+            reason = chunk_waiver(task) if chunk_waiver is not None else None
+            if reason is not None:
+                chunk = dict(task.metadata["chunk"])
+                reused_records[task.task_id] = {
+                    "task_id": task.task_id, "stage": "chunk", "status": "waived",
+                    "attempts": 0, "attempt_history": [],
+                    "error": f"operator waived rows {int(chunk['row_start']) + 1}-{chunk['row_end']}: {reason}",
+                    "coverage": {
+                        key: chunk[key]
+                        for key in ("row_start", "row_end", "row_count", "task_chunk_index", "task_chunk_count")
+                        if key in chunk
+                    },
+                }
+                continue
             yield task
 
     accepted_chunks, task_records = await _validated_pool_async(
@@ -1669,6 +1715,7 @@ async def execute_analysis_workload_async(
         correction_attempts=int(dict(plan.get("analysis_limits") or {}).get(
             "validation_correction_attempts", analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS)),
         accepted_callback=chunk_recovery.accept if chunk_recovery is not None else None,
+        failed_callback=chunk_failed,
     )
     accepted_chunks.update(reused_chunks)
     task_records.update(reused_records)

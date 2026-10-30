@@ -117,7 +117,10 @@ vraptor collect analyze \
 
 Missing non-terminal local analysis is reconstructed from the saved Velociraptor
 flows. Use `--retry-failed --request-id REQUEST_ID` to resume failed stages while
-reusing accepted chunks and artifact candidates. `--reset-artifact NAME` and
+reusing accepted chunks and artifact candidates. Chunks that fail every attempt
+are named in the summary and the request's `analysis/failed-chunks.json`; after
+review, `--waive-failed-chunk KEY --waive-reason TEXT` publishes the accepted
+chunks with that gap. `--reset-artifact NAME` and
 `--reset-analysis` explicitly discard accepted local work. These options require
 the exact request and never recollect evidence. Read the shared
 [correction and recovery contract](../../docs/reference/analysis-recovery.md)

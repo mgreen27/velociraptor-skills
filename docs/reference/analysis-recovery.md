@@ -46,12 +46,73 @@ checkpoints must review the failed artifact again.
 
 `--reset-artifact` and `--reset-analysis` still explicitly discard accepted work.
 Ordinary reruns keep terminal failed artifacts held; use `--retry-failed` to
-resume them. Final synthesis can also be resumed by rerunning the saved request.
+resume them, or waive reviewed chunks as described below. Final synthesis can also be resumed by rerunning the saved request.
 For a synthesis-only failure with accepted checkpoints, `vraptor summarize
 --checkpoint /path/to/request-analysis.json` validates the retained inputs and
 runs only final synthesis, without querying flows or rerunning artifact analysis.
 Both forms review the saved request's scope. `--reset-artifact` invalidates an
 artifact's accepted work; it does not narrow a multi-artifact request to that artifact.
+
+## Review chunks that fail every attempt
+
+A chunk that still fails after its correction and provider retry budgets is
+recorded in a durable, value-free review file:
+
+- host: `analysis/failed-chunks.json` under the request, scoped to client and request;
+- hunt: `hunt-failed-chunks.json` beside `hunt-analysis-state.json`, scoped to hunt and org.
+
+Host entries are keyed `ARTIFACT:TASK_ID`; hunt entries use the streaming chunk
+ID. Each entry holds the artifact and flow or hunt ID, the chunk position (row
+range, chunk index/count, first and last `Sxxxx-R<number>` reference), the
+SHA-256 of the rendered chunk prompt, attempts used and the configured budget,
+per-attempt category, defect codes, timestamps and response hashes, a failure
+count across runs, and the next commands. Reruns merge into the file; a later
+accepted chunk marks its entry `resolved`, and a host re-plan that no longer has
+the chunk marks it `superseded`. At most 500 entries are kept, dropping closed
+entries first, with an omitted count. The file is `compact_state`:
+prompts, model output, validator free text and source values are excluded.
+
+The host result, artifact report and chat summary name each failed chunk, for
+example ``Artifact chunk 71/71 rows 6901-7000 (S0003-R6901..S0003-R7000) failed
+after 3 attempts: validation_failed; invalid_reference``, report
+`Chunk coverage: 70/71 chunks accepted`, and give the resume command. Inspect the
+referenced rows in Velociraptor, then choose one action:
+
+```bash
+# Retry: accepted chunks are reused; only failed chunks are sent.
+vraptor analyze --id IR1234 --client C.1234abcd --request-id REQUEST_ID \
+  --question 'Was malicious execution observed?' --retry-failed
+
+# Accept the gap after manual review (repeat the key option per chunk).
+vraptor analyze --id IR1234 --client C.1234abcd --request-id REQUEST_ID \
+  --question 'Was malicious execution observed?' \
+  --waive-failed-chunk 'Artifact:artifact-task-1-chunk-70' \
+  --waive-reason 'Rows reviewed manually in Velociraptor'
+```
+
+`--waive-failed-chunk KEY` accepts a recorded key or unique task ID, requires
+`--waive-reason` (1-500 characters) and implies `--retry-failed`. A waived chunk
+is not analysed: the artifact publishes its accepted chunks as
+`complete_with_failures`, the waived rows and reason are passed to synthesis as a
+coverage gap, and summaries show `waived by operator, not analysed: REASON`. The
+entry records the reason, time and input hash; the waiver lapses when the
+rendered chunk changes (source, question, configuration or prompt). Use
+`--retry-waived` to revoke the request's waivers and send those chunks again. An
+artifact with no accepted chunk still fails. `--reset-artifact NAME` discards the
+artifact's accepted chunks instead.
+
+Hunt analysis remains fail-closed and has no chunk-level resume or waiver. Its
+error names the record file and chunk IDs, and the run record carries
+`failed_chunks_file` and `failed_chunk_ids`; rerun the same command after review.
+
+To inspect the raw material, add `--keep-failed-chunk-evidence` to `analyze`,
+`collect analyze` or live `hunt analyze`. Only chunks that fail every attempt are
+exported, under `<case-root>/<id>/debug/failed-chunks/<UTC timestamp>-<suffix>/`
+as `failed-NNN.attempt-NNN.prompt.txt`, `.response.txt` and `.error.txt` with a
+`manifest.json`. Files are mode `0600` in `0700` directories. This is an explicit
+`interoperability_export` containing evidence and untrusted model output; the
+review entry references it by path and SHA-256. Remove it explicitly when no
+longer needed.
 
 ## Troubleshooting and retention
 
@@ -125,9 +186,10 @@ equivalent prose without losing distinct coverage gaps.
 ## Offline validation
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_analysis_recovery.py tests/test_host_final_review.py tests/test_synthesis_reference_recovery.py tests/test_saved_synthesis_diagnostics.py tests/test_analysis_operator_status.py tests/test_agent_analysis_defaults.py tests/core/test_core_collection_analysis_integration.py tests/core/test_core_host_analysis_state.py
+.venv/bin/python -m pytest -q tests/test_analysis_recovery.py tests/test_failed_chunk_review.py tests/test_host_final_review.py tests/test_synthesis_reference_recovery.py tests/test_saved_synthesis_diagnostics.py tests/test_analysis_operator_status.py tests/test_agent_analysis_defaults.py tests/core/test_core_collection_analysis_integration.py tests/core/test_core_host_analysis_state.py
 ```
 
 Synthetic tests cover correction budgets, terminal failures, failed-chunk reuse,
+failed-chunk records, waivers, opt-in failed-chunk evidence,
 source/configuration invalidation, corruption, request switching, retained
 diagnostics, confidence validation, coverage labels and atomic state publication.

@@ -48,6 +48,15 @@ def add_prompt_debug_argument(parser: argparse.ArgumentParser) -> None:
             "saves one; omitted saves none. Separate from metadata-only --debug."
         ),
     )
+    parser.add_argument(
+        "--keep-failed-chunk-evidence", action="store_true",
+        help=(
+            "Explicitly export the prompts, raw AI responses and validator messages of "
+            "chunks that fail every attempt, including evidence, under the case "
+            "debug/failed-chunks directory. The default failed-chunk record holds no "
+            "evidence values or model output."
+        ),
+    )
 
 
 def add_query_timeout_argument(parser: argparse.ArgumentParser) -> None:

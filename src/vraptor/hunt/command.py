@@ -3725,6 +3725,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.command == "analyze":
         if args.debug_chunk_prompts and args.snapshot:
             parser.error("--debug-chunk-prompts requires live host or hunt analysis")
+        if args.keep_failed_chunk_evidence and args.snapshot:
+            parser.error("--keep-failed-chunk-evidence requires live host or hunt analysis")
         if args.stack_max_total_rows is None and args.profile == "autoruns":
             args.stack_max_total_rows = 20
         elif args.stack_max_total_rows == 0:
@@ -3842,6 +3844,7 @@ def main(argv: list[str] | None = None, *, existing_only: bool = False) -> int:
             with prompt_debug.session(
                 resolve_case_root(args) / investigation_id,
                 args.debug_chunk_prompts,
+                keep_failed=bool(getattr(args, "keep_failed_chunk_evidence", False)),
             ) as prompt_dump:
                 payload = command_analyze(args)
             if args.debug_chunk_prompts:

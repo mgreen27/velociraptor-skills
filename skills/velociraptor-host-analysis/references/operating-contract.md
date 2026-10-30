@@ -85,8 +85,11 @@ After a collection polling timeout, rerun `collect analyze` with the exact repor
 replace unchanged flows automatically.
 
 A terminal failed component remains held until `--retry-failed --request-id ID`
-resumes its failed stages. Explicit `--reset-artifact` or `--reset-analysis`
-instead discards accepted work. These are local analysis operations and do not
+resumes its failed stages. A chunk that fails every attempt is recorded value-free
+in the request's `analysis/failed-chunks.json`; after operator review,
+`--waive-failed-chunk KEY --waive-reason TEXT` accepts the gap, and
+`--keep-failed-chunk-evidence` explicitly retains its prompts and raw responses.
+Explicit `--reset-artifact` or `--reset-analysis` instead discards accepted work. These are local analysis operations and do not
 recollect. See [correction and recovery](../../../docs/reference/analysis-recovery.md)
 for diagnostics and the request-owned retention contract.
 

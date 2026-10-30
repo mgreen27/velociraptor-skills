@@ -713,6 +713,33 @@ def render_flow_freshness(flows: Iterable[Mapping[str, Any]]) -> list[str]:
     return lines
 
 
+def failed_chunk_line(chunk: Mapping[str, Any]) -> str:
+    """One review line for a chunk that exhausted its attempts or was waived."""
+    position = (
+        f" chunk {int(chunk['task_chunk_index']) + 1}/{chunk['task_chunk_count']}"
+        if "task_chunk_index" in chunk and "task_chunk_count" in chunk
+        else ""
+    )
+    rows = (
+        f" rows {int(chunk['row_start']) + 1}-{chunk['row_end']}"
+        if "row_start" in chunk and "row_end" in chunk
+        else ""
+    )
+    refs = (
+        f" ({chunk['first_reference']}..{chunk['last_reference']})"
+        if chunk.get("first_reference") and chunk.get("last_reference")
+        else ""
+    )
+    where = f"`{chunk.get('artifact') or 'unknown'}`{position}{rows}{refs}"
+    if chunk.get("status") == "waived":
+        return f"{where} waived by operator, not analysed: {chunk.get('reason', '')}"
+    codes = ", ".join(str(code) for code in chunk.get("defect_codes") or []) or "no defect codes"
+    return (
+        f"{where} failed after {chunk.get('attempts', 0)} attempts: "
+        f"{chunk.get('category', 'analysis_error')}; {codes}. Key `{chunk.get('key', '')}`."
+    )
+
+
 def render_resume(result: Mapping[str, Any], status: str = "") -> list[str]:
     """Expose saved recovery even when no detailed failed-stage diagnostics exist."""
     effective_status = str(status or result.get("status") or "")
@@ -750,12 +777,25 @@ def render_chat_summary(
     if flow_metadata is not None:
         lines.extend(render_flow_freshness(flow_metadata))
     troubleshooting = dict(payload.get("troubleshooting") or {})
+    failed_chunks = list(troubleshooting.get("failed_chunks") or [])
     if troubleshooting.get("failed_stages"):
         lines.append(f"- Troubleshooting: `{troubleshooting.get('diagnostics_file', '')}`")
-        for item in troubleshooting["failed_stages"][:10]:
+        stages = [
+            item for item in troubleshooting["failed_stages"]
+            if not (failed_chunks and item.get("stage") == "chunk")
+        ]
+        for item in stages[:10]:
             last = (item.get("attempt_history") or [{}])[-1]
             codes = ", ".join(str(d.get("code") or "") for d in last.get("defects") or [])
             lines.append(f"- Failed `{item.get('stage')}` / `{item.get('task_id')}` after {item.get('attempts', 0)} attempts: {last.get('category', item.get('category', 'analysis_error'))}; {codes or last.get('message', item.get('message', 'See diagnostics.'))}")
+    if failed_chunks:
+        lines.append(f"- Failed chunk record: `{troubleshooting.get('failed_chunks_file', '')}`")
+        lines.extend(f"- {failed_chunk_line(chunk)}" for chunk in failed_chunks[:10])
+        if any(chunk.get("status") == "failed" for chunk in failed_chunks):
+            lines.append(
+                "- After review, retry with the resume command below, or accept a gap by "
+                "adding `--waive-failed-chunk KEY --waive-reason TEXT` to it."
+            )
     lines.extend(render_resume(payload, effective_status))
     if effective_coverage:
         for label, key in (
@@ -1093,6 +1133,11 @@ def render_artifact_report(result: Mapping[str, Any]) -> str:
         "",
         f"- Review status: `{result.get('status', 'unknown')}`",
         f"- Review coverage: {int(coverage.get('reviewed_rows') or 0)}/{int(coverage.get('planned_rows') or 0)} exposed rows",
+        *(
+            [f"- Chunk coverage: {int(coverage.get('accepted_chunks') or 0)}/{int(coverage['planned_chunks'])} chunks accepted"]
+            if int(coverage.get("planned_chunks") or 0) > int(coverage.get("accepted_chunks") or 0)
+            else []
+        ),
         f"- Collection coverage: `{dict(result.get('collection_coverage') or {}).get('status', 'not_assessed')}`; flow `{dict(result.get('collection_coverage') or {}).get('flow_state', 'UNKNOWN')}`",
         "- Rows sharing manager-selected fields use one full projected representative.",
         f"- Analysis time filter: `{coverage.get('time_filter', 'not_requested')}`",
