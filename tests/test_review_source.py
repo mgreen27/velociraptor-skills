@@ -21,10 +21,16 @@ class ReviewSourceTest(unittest.TestCase):
         )
 
     def test_flow_source_uses_bound_client_flow_and_artifact_values(self):
-        source = review_source.flow_source(
-            client_id="C.1234",
-            flow_id="F.5678",
+        source = review_source.ReviewSource(
+            source_type="flow",
+            source_id="C.1234:F.5678:Artifact.Test/Results",
             artifact="Artifact.Test/Results",
+            vql="source(client_id=ClientId, flow_id=FlowId, artifact=ArtifactName)",
+            environment={
+                "ClientId": "C.1234",
+                "FlowId": "F.5678",
+                "ArtifactName": "Artifact.Test/Results",
+            },
         )
 
         self.assertEqual(source.source_type, "flow")

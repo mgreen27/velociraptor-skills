@@ -111,7 +111,6 @@ CURRENT_HUNT_QUESTION = ""
 CURRENT_SERVER_PROFILE = ""
 HUNT_RESULTS_BATCH_SIZE = 10000
 HUNT_RESULTS_RETRY_MAX_ROWS = (10000, 5000, 1000, 250, 100, 50, 10, 1)
-HUNT_REVIEW_DEFAULT_LIMIT = 1000
 HUNT_REVIEW_LIMIT_PRESETS = {
     "explore": 1000,
     "broad": 10000,
@@ -219,43 +218,39 @@ def target_namespace(target_os: Any) -> str:
     return normalize_target_os(target_os) or UNSCOPED_TARGET_NAMESPACE
 
 
-def target_hunt_root(investigation_id: str, target_os: str | None) -> Path:
+def hunt_root(investigation_id: str) -> Path:
     # Hunt IDs are globally unique on a Velociraptor server. Keep the target OS
     # in hunt metadata rather than duplicating it in the filesystem hierarchy.
     return case_layout.hunts_dir(CASE_ROOT, investigation_id)
 
 
-def hunt_root(investigation_id: str, target_os: str | None = None) -> Path:
-    return target_hunt_root(investigation_id, current_target_os() if target_os is None else target_os)
-
-
-def hunt_dir(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
+def hunt_dir(investigation_id: str, hunt_id: str) -> Path:
     return case_layout.hunt_dir(CASE_ROOT, investigation_id, hunt_id)
 
 
-def hunt_state_path(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
-    return hunt_dir(investigation_id, hunt_id, target_os=target_os) / "state.json"
+def hunt_state_path(investigation_id: str, hunt_id: str) -> Path:
+    return hunt_dir(investigation_id, hunt_id) / "state.json"
 
 
 def current_profile_path(investigation_id: str, profile: str, target_os: str | None = None) -> Path:
     namespace = target_namespace(
         current_target_os() if target_os is None else target_os
     )
-    return hunt_root(investigation_id, target_os=target_os) / (
+    return hunt_root(investigation_id) / (
         f"current-{namespace}-{profile}.json"
     )
 
 
-def get_exports_dir(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
-    return hunt_dir(investigation_id, hunt_id, target_os=target_os) / "exports"
+def get_exports_dir(investigation_id: str, hunt_id: str) -> Path:
+    return hunt_dir(investigation_id, hunt_id) / "exports"
 
 
-def get_downloads_dir(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
-    return hunt_dir(investigation_id, hunt_id, target_os=target_os) / "downloads"
+def get_downloads_dir(investigation_id: str, hunt_id: str) -> Path:
+    return hunt_dir(investigation_id, hunt_id) / "downloads"
 
 
-def baseline_targets_path(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
-    return hunt_dir(investigation_id, hunt_id, target_os=target_os) / "baseline-targets.json"
+def baseline_targets_path(investigation_id: str, hunt_id: str) -> Path:
+    return hunt_dir(investigation_id, hunt_id) / "baseline-targets.json"
 
 
 def stable_json(value: Any) -> str:
@@ -321,13 +316,7 @@ def select_profile_artifact(profile: str, artifact_selector: str) -> str:
     )
 
 
-def profile_allows_multi_artifact_hunt(profile: str | None) -> bool:
-    return False
-
-
 def enforce_single_artifact_hunt(request: Any, profile: str | None = None) -> Any:
-    if profile_allows_multi_artifact_hunt(profile):
-        return request
     if len(request.expected_specs) == 1:
         return request
 
@@ -398,12 +387,6 @@ def build_request_from_args(args: argparse.Namespace) -> Any:
     if profile:
         profile_request = build_request_for_profile(profile)
         if artifact_selector:
-            if profile_allows_multi_artifact_hunt(profile) and env_values:
-                raise RuntimeError(
-                    "Shared --env values are not supported when the full profile resolves "
-                    "to a multi-artifact native hunt. Select one explicit --artifact or "
-                    "run the profile without --env overrides."
-                )
             if len(artifact_selector) != 1:
                 raise RuntimeError(
                     "velociraptor-hunting currently limits native hunts to one artifact each. "
@@ -592,7 +575,7 @@ def combined_hunt_tags(
     return unique_ordered(build_hunt_tags(investigation_id, profile, signature, target_os) + extra_tags)
 
 
-def single_hunt_target_name(profile: str | None, request: Any, artifact_selector: list[str]) -> str:
+def single_hunt_target_name(profile: str | None, request: Any) -> str:
     if len(request.expected_specs) != 1:
         raise RuntimeError("Single-hunt target naming requires exactly one resolved artifact.")
 
@@ -607,10 +590,8 @@ def single_hunt_target_name(profile: str | None, request: Any, artifact_selector
 
 def target_name_from_args(args: argparse.Namespace, request: Any) -> str:
     profile = str(getattr(args, "profile", "") or "") or None
-    if profile and profile_allows_multi_artifact_hunt(profile) and not artifact_selector_values(args):
-        return profile
     if profile or len(request.expected_specs) == 1:
-        return single_hunt_target_name(profile, request, artifact_selector_values(args))
+        return single_hunt_target_name(profile, request)
     if request.target_collection_type:
         return str(request.target_collection_type)
     return "custom"
@@ -1149,8 +1130,8 @@ def write_hunt_result_query_error(path: Path, *, artifact: str, artifact_name: s
     )
 
 
-def get_review_dir(investigation_id: str, hunt_id: str, target_os: str | None = None) -> Path:
-    return hunt_dir(investigation_id, hunt_id, target_os=target_os) / "review"
+def get_review_dir(investigation_id: str, hunt_id: str) -> Path:
+    return hunt_dir(investigation_id, hunt_id) / "review"
 
 
 def safe_review_token(value: str) -> str:
@@ -1461,7 +1442,6 @@ def review_hunt_results(
     hunt_id: str,
     request: Any,
     *,
-    target_os: str | None,
     operation: str,
     field_profile: str,
     fields: list[str],
@@ -1484,7 +1464,7 @@ def review_hunt_results(
         raise RuntimeError(f"--inventory-mode must be one of: {', '.join(HUNT_REVIEW_INVENTORY_MODES)}")
     if operation == "stack" and group_by and stack_id:
         raise RuntimeError("Use either --stack-id or explicit --group-by values, not both.")
-    review_dir = get_review_dir(investigation_id, hunt_id, target_os=target_os)
+    review_dir = get_review_dir(investigation_id, hunt_id)
     review_dir.mkdir(parents=True, exist_ok=True)
     output_dir = review_dir / operation
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1907,13 +1887,13 @@ def baseline_metadata_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_baseline_snapshot(saved_state: dict[str, Any] | None, investigation_id: str, hunt_id: str, target_os: str) -> dict[str, Any] | None:
+def load_baseline_snapshot(saved_state: dict[str, Any] | None, investigation_id: str, hunt_id: str) -> dict[str, Any] | None:
     candidate_paths: list[Path] = []
     if saved_state:
         target_path = str(saved_state.get("baseline_targets_file") or "").strip()
         if target_path:
             candidate_paths.append(Path(target_path).expanduser())
-    candidate_paths.append(baseline_targets_path(investigation_id, hunt_id, target_os=target_os))
+    candidate_paths.append(baseline_targets_path(investigation_id, hunt_id))
     seen_paths: set[str] = set()
     for path in candidate_paths:
         path_key = str(path)
@@ -1965,7 +1945,7 @@ def capture_baseline_snapshot(
         "hostname_sample": hostname_sample,
         "targets": targets,
     }
-    output_path = baseline_targets_path(investigation_id, hunt_id, target_os=target_os)
+    output_path = baseline_targets_path(investigation_id, hunt_id)
     write_json(output_path, snapshot)
     snapshot["baseline_targets_file"] = str(output_path)
     return snapshot
@@ -1987,7 +1967,7 @@ def prepare_baseline_snapshot(
         existing_state = read_json(existing_state_path)
         existing_state.setdefault("target_os", target_os_from_state_path(existing_state_path) or normalize_target_os(target_os))
 
-    existing_snapshot = load_baseline_snapshot(existing_state, investigation_id, hunt_id, normalize_target_os(target_os))
+    existing_snapshot = load_baseline_snapshot(existing_state, investigation_id, hunt_id)
     should_capture = action in {"created_new_hunt", "activated_paused_hunt"} or existing_snapshot is None
     if should_capture:
         if action == "created_new_hunt":
@@ -2688,7 +2668,7 @@ def persist_state(
         "expected_spec_arguments": collection.serialize_specs(request.expected_specs),
         **payload,
     }
-    state_path = hunt_state_path(investigation_id, hunt_id, target_os=target_os)
+    state_path = hunt_state_path(investigation_id, hunt_id)
     state["state_file"] = str(state_path)
     current_path = current_profile_path(investigation_id, profile, target_os=target_os)
     state["current_state_file"] = str(current_path)
@@ -2897,7 +2877,6 @@ def export_hunt(
     hunt_id: str,
     request: Any,
     *,
-    target_os: str | None = None,
     artifact_sources: list[str] | None = None,
 ) -> dict[str, Any]:
     persistence_authorization = persistence_policy.authorize_persistence(
@@ -2909,7 +2888,7 @@ def export_hunt(
         raw_rows=True,
         explicit_export=True,
     )
-    exports_dir = get_exports_dir(investigation_id, hunt_id, target_os=target_os)
+    exports_dir = get_exports_dir(investigation_id, hunt_id)
     exports_dir.mkdir(parents=True, exist_ok=True)
 
     exported_files: list[dict[str, Any]] = []
@@ -2971,7 +2950,6 @@ def download_hunt_results(
     hunt_id: str,
     request: Any,
     *,
-    target_os: str | None = None,
     artifact_sources: list[str] | None = None,
 ) -> dict[str, Any]:
     persistence_authorization = persistence_policy.authorize_persistence(
@@ -2983,7 +2961,7 @@ def download_hunt_results(
         raw_rows=True,
         explicit_export=True,
     )
-    downloads_dir = get_downloads_dir(investigation_id, hunt_id, target_os=target_os)
+    downloads_dir = get_downloads_dir(investigation_id, hunt_id)
     downloads_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded_files: list[dict[str, Any]] = []
@@ -3079,7 +3057,6 @@ def resolve_saved_or_explicit_hunt(
             saved_state,
             args.investigation_id,
             hunt_id,
-            saved_target_os or hunt_row_target_os,
         )
         return {
             "selected_artifact": selected_artifact,
@@ -3106,7 +3083,6 @@ def resolve_saved_or_explicit_hunt(
         saved_state,
         args.investigation_id,
         hunt_id,
-        str(saved_state.get("target_os") or current_target_os()),
     )
     return {
         "selected_artifact": selected_artifact,
@@ -3328,9 +3304,7 @@ def command_profiles() -> dict[str, Any]:
                 "requested_groups": request.requested_groups,
                 "requested_artifacts": request.requested_artifacts,
                 "expected_spec_arguments": collection.serialize_specs(request.expected_specs),
-                "requires_explicit_artifact_selection": (
-                    len(request.expected_specs) != 1 and not profile_allows_multi_artifact_hunt(name)
-                ),
+                "requires_explicit_artifact_selection": len(request.expected_specs) != 1,
             }
         )
     return {"profiles": profiles}
@@ -3758,7 +3732,6 @@ def command_stop(args: argparse.Namespace) -> dict[str, Any]:
             saved_state,
             args.investigation_id,
             args.hunt_id,
-            local_target_os,
         )
         initial_state = normalize_hunt_state(hunt_row.get("state"))
         stop_requested = initial_state != "STOPPED"
@@ -3813,7 +3786,6 @@ def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
             args.investigation_id,
             hunt_id,
             request,
-            target_os=str((saved_state or {}).get("target_os") or hunt_target_os(hunt_row) or current_target_os()),
             artifact_sources=hunt_result_artifact_sources(hunt_row),
         )
 
@@ -3872,7 +3844,6 @@ def command_download_results(args: argparse.Namespace) -> dict[str, Any]:
             args.investigation_id,
             hunt_id,
             request,
-            target_os=str((saved_state or {}).get("target_os") or hunt_target_os(hunt_row) or current_target_os()),
             artifact_sources=hunt_result_artifact_sources(hunt_row),
         )
 
@@ -3935,7 +3906,6 @@ def command_review_results(args: argparse.Namespace) -> dict[str, Any]:
             args.investigation_id,
             hunt_id,
             request,
-            target_os=target_os,
             operation=args.review_operation,
             field_profile=args.field_profile,
             fields=list(args.field or []),

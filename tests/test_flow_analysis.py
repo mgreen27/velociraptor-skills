@@ -25,7 +25,6 @@ from vraptor.agent.runtime import AgentRequest
 from vraptor.agent.runtime import AgentResult
 from vraptor.agent.runtime import AgentRuntimeLimits
 from vraptor.analyze import time_scope as analysis_time_scope
-from vraptor.artifacts import profiles as artifact_profiles
 from vraptor.analyze import host as collection_analysis
 from vraptor.analyze import flow as flow_analysis
 from vraptor.analyze import coordinator as flow_analysis_coordinator
@@ -3399,12 +3398,11 @@ class FlowAnalysisTest(unittest.TestCase):
             *,
             results,
             limits,
-            encoding_name,
             shared_execute,
             schedule,
             **_kwargs,
         ):
-            resolved = runtime_limits(limits, encoding_name)
+            resolved = runtime_limits(limits, limits["token_encoding"])
             task = AgentRequest(
                 task_id="hunt-analysis-synthesis",
                 prompt="synthesize",

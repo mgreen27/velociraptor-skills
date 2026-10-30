@@ -239,14 +239,8 @@ class ReviewedRuleAuthorityTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.reference = self.root / "rmm.json"
-        self.reference.write_text(json.dumps({
-            "executables": ["remoteagent.exe", "assist-?.exe", "screen-*.exe"],
-            "installation_paths": [r"c:\program files\remote suite\*"],
-        }))
-        self.classifier = golden.RmmClassifier(self.reference)
         self.broad = {**RULE, "image_path_regex": "(?s).*", "launch_string_regex": "(?s).*"}
-        self.index = autoruns_regex.RegexIndex([self.broad], classifier=self.classifier)
+        self.index = autoruns_regex.RegexIndex([self.broad])
 
     def sources(self):
         paths = [

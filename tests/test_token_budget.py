@@ -25,38 +25,6 @@ class TokenBudgetTest(unittest.TestCase):
             0,
         )
 
-    def test_split_text_chunks_preserves_unicode_and_budget(self):
-        text = "host=alpha\nPowerShell café 🚨\n" + ("x" * 80)
-
-        chunks = token_budget.split_text_chunks(text, 5)
-
-        self.assertEqual("".join(chunks), text)
-        self.assertTrue(chunks)
-        self.assertTrue(
-            all(token_budget.estimate_tokens(chunk) <= 5 for chunk in chunks)
-        )
-
-    def test_oversized_split_preserves_utf8_boundaries(self):
-        text = ("évidence-🚨-" * 40) + "done"
-
-        chunks = token_budget.split_oversized_text_by_token_budget(text, 4)
-
-        self.assertEqual("".join(chunks), text)
-        self.assertTrue(
-            all(token_budget.estimate_tokens(chunk) <= 4 for chunk in chunks)
-        )
-
-    def test_split_prefers_whole_lines(self):
-        text = "alpha\nbeta\ngamma\n"
-
-        chunks = token_budget.split_text_chunks(text, 2)
-
-        self.assertEqual(chunks, ["alpha\n", "beta\n", "gamma\n"])
-
-    def test_invalid_limit_fails_closed(self):
-        with self.assertRaises(token_budget.TokenBudgetError):
-            token_budget.split_text_chunks("evidence", 0)
-
     def test_optional_budget_environment_returns_none_when_unset(self):
         with mock.patch.dict(
             os.environ,

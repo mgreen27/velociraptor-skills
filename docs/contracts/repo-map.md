@@ -22,7 +22,7 @@ other commands that name `cli.py`; every other area goes to
 | `collect check, ensure, export, plan, poll, queue, status` | `collect/requests.py:main` |
 | `collect analyze`, `collect hydrate` | `analyze/command.py:main`, `collect/hydrate.py:main` |
 | `hunt run, status, snapshot, analyze, retry-missing` | `hunt/command.py:main` |
-| `hunt native ...` and its compatibility aliases (`hunt check`, `hunt stop`, ...) | `hunt/operations.py:main` |
+| `hunt native check, download-results, ensure, export-results, lookup, profiles, review-results, search, status, stop` | `hunt/operations.py:main` |
 | `hunt analyze-saved` | `hunt/analysis.py:main` |
 | `autoruns ...` | `autoruns/golden.py:main` |
 | `artifacts inventory, linux-plan, policy, profiles, scenarios, validate-schema` | `artifacts/inventory.py`, `linux.py`, `policy_cli.py`, `profile_cli.py`, `scenario_cli.py`, `schema.py` |
@@ -88,5 +88,3 @@ Tests that load a file by path patch their own copy of the module, so
   (`case_layout.py`, `hunt/operations.py`). Confirm the module before editing.
 - Route target `collection_analysis` means `analyze/command.py`, but tests import
   `analyze/host.py` under the alias `collection_analysis`.
-- `module-map.json` in this folder is a table of retired module names, not a map
-  of the current tree.

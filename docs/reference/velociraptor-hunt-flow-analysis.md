@@ -96,8 +96,9 @@ analysis/run directory so accepted partition recovery is not silently lost.
    ```
 
 5. Treat `analysis-hunt.md` as generated analysis memory and Velociraptor as the
-   source of truth. Use `snapshot`, `export-results`, or `download-results` only
-   when durable evidence extraction is explicitly required.
+   source of truth. Use `hunt snapshot`, `hunt native export-results`, or
+   `hunt native download-results` only when durable evidence extraction is
+   explicitly required.
 
 A full run is the normal path. It gives a fresh analysis of the current hunt
 result set with query count based primarily on selected artifacts, not host

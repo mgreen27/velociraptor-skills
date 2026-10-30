@@ -23,7 +23,7 @@ from vraptor.logging import operations as operation_log
 from vraptor.logging import command as operation_log_cli
 
 
-from vraptor.resources import repository_root, resource_root
+from vraptor.resources import resource_root
 BOOTSTRAP_ROOT = resource_root() / "scripts" / "velociraptor"
 
 
@@ -31,8 +31,6 @@ BOOTSTRAP_ROOT = resource_root() / "scripts" / "velociraptor"
 class CommandRoute:
     target: str
     strip_command: bool = False
-    lifecycle: str = "canonical"
-    replacement: str = ""
 
 
 COLLECT_COMMAND_ROUTES = {
@@ -63,61 +61,14 @@ NATIVE_HUNT_COMMANDS = frozenset(
     }
 )
 
-# Retain compatibility routes until all callers use the explicit native namespace.
-# Replacements are recorded here and checked by the CLI tests.
 HUNT_COMMAND_ROUTES = {
     "analyze": CommandRoute("hunt_workflow"),
     "analyze-saved": CommandRoute("hunt_analysis", strip_command=True),
-    "check": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native check",
-    ),
-    "download-results": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native download-results",
-    ),
-    "ensure": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native ensure",
-    ),
-    "export-results": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native export-results",
-    ),
-    "lookup": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native lookup",
-    ),
     "native": CommandRoute("hunting", strip_command=True),
-    "profiles": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native profiles",
-    ),
     "retry-missing": CommandRoute("hunt_workflow"),
-    "review-results": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native review-results",
-    ),
     "run": CommandRoute("hunt_workflow"),
-    "search": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native search",
-    ),
     "snapshot": CommandRoute("hunt_workflow"),
     "status": CommandRoute("hunt_workflow"),
-    "stop": CommandRoute(
-        "hunting",
-        lifecycle="compatibility",
-        replacement="hunt native stop",
-    ),
 }
 
 
@@ -136,56 +87,6 @@ def invoke_route(route: CommandRoute, args: list[str]) -> int:
     if route.target == "hunting":
         return hunting.main(forwarded)
     raise RuntimeError(f"Unknown internal Velociraptor route target: {route.target}")
-
-
-def usage() -> str:
-    return """Usage: dfir <area> <command> [args]
-
-Areas:
-  setup       Prepare/verify local, remote dead-disk, or live readiness
-  config      Resolve a server or fetch API/client configuration
-  mapped      Add or inspect remote dead-disk mapped clients
-  query       Execute bounded VQL through an engagement API client
-  clients     Find or list clients with name, OS, label, and online filters
-  artifacts   Inventory or manage artifact profiles, Linux plans, and scenarios
-  autoruns    Create, update, publish, query, or remove Autoruns GoldenDB entries
-  collect     Queue, monitor, explicitly export, or hydrate host collections
-  hunt        Run, inspect, analyze, retry missing clients, review, or snapshot hunts
-  logs        Show/follow progress or inspect local operation status
-
-Global logging options (accepted anywhere):
-  --log-level debug|info|warning|error
-  --log-file PATH
-  --no-log-file
-
-Set VELO_PROGRESS_FILE_DEBUG=true to retain verbose DEBUG lines in the file.
-Analysis --debug also enables them for that command.
-Sanitized Velociraptor server messages and numeric progress are logged at INFO.
-Credential values are redacted; operational text may include evidence context.
-
-Examples:
-  dfir setup live-remote --server-profile lab7 --engagement-id ir1234 --server-ip 192.0.2.10
-  dfir mapped add-remote --api-client FILE --client-config FILE disk.E01
-  dfir mapped status --client disk01 --json
-  dfir query --server-profile lab7 --vql "SELECT * FROM clients() LIMIT 10"
-  dfir clients find --server-profile lab7 --name host01
-  dfir clients list --server-profile lab7 --label ir1234
-  dfir artifacts inventory --server-profile lab7 --output-dir DIR
-  dfir artifacts policy show
-  dfir artifacts linux-plan --inventory FILE --mode standard
-  dfir artifacts scenarios list
-  dfir autoruns inspect
-  dfir autoruns filter --manifest /path/to/collection-export.json
-  dfir collect plan --engagement-id IR1234 --server-profile lab7 --client-id C.1234abcd --bundle ir-standard-live
-  dfir collect analyze --engagement-id IR1234 --server-profile lab7 --client-id C.1234abcd
-  dfir collect analyze --engagement-id IR1234 --server-profile lab7 --client-id C.1234abcd --artifact Windows.Forensics.Prefetch --question "Was the executable run?"
-  dfir collect ensure --engagement-id IR1234 --server-profile lab7 --host host01 --collection-type all
-  dfir hunt run --engagement-id IR1234 --server-profile lab7 --profile detectraptor --question "Find compromise leads"
-  dfir hunt analyze --engagement-id IR1234 --server-profile lab7 --hunt-id H.1234
-  dfir hunt retry-missing --id IR1234 --hunt-id H.1234 --after-hours 24
-  dfir hunt native ensure --target linux --artifact Linux.Sys.Users
-  dfir hunt analyze-saved --state-file /path/to/state.json
-"""
 
 
 def collect_usage() -> str:
@@ -228,7 +129,7 @@ def run_bootstrap(script_name: str, argv: list[str]) -> int:
 
 def _dispatch(args: list[str]) -> int:
     if not args or args[0] in {"-h", "--help", "help"}:
-        print(usage())
+        print("Usage: vraptor <command> [args]; run vraptor --help for the command list.")
         return 0
 
     area = args.pop(0)
@@ -318,6 +219,9 @@ def _dispatch(args: list[str]) -> int:
         command = args[0]
         route = HUNT_COMMAND_ROUTES.get(command)
         if route is None:
+            if command in NATIVE_HUNT_COMMANDS:
+                print(f"Use: vraptor hunt native {command}", file=sys.stderr)
+                return 1
             print(f"Unknown Velociraptor hunt command: {command}", file=sys.stderr)
             return 1
         if command == "native" and len(args) > 1:

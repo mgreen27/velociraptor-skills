@@ -24,7 +24,7 @@ CERTIFICATE_WARNING_DAYS = 30
 
 
 def state_path(case_root: Path, engagement_id: str) -> Path:
-    return case_layout.engagement_dir(case_root, engagement_id) / "engagement.json"
+    return case_layout.engagement_state_path(case_root, engagement_id)
 
 
 def _canonical_hash(value: Any) -> str:

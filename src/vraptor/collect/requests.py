@@ -496,8 +496,7 @@ def bounded_argument_keys(env: dict[str, str]) -> list[str]:
         normalized = key.lower()
         if (
             "regex" in normalized
-            or normalized.endswith("after")
-            or normalized.endswith("before")
+            or normalized.endswith(("after", "before"))
             or normalized.startswith("date")
         ):
             bounded.append(key)
@@ -1993,10 +1992,7 @@ def build_request_from_args(args: argparse.Namespace) -> CollectionRequest:
 def flow_matches_spec(flow: FlowRecord, expected: ArtifactSpec) -> bool:
     expected_identity = collection_run_identity("", [expected])["identity"]
     return any(
-        run_identity.identities_match(
-            expected_identity,
-            collection_run_identity("", [spec])["identity"],
-        )
+        collection_run_identity("", [spec])["identity"] == expected_identity
         for spec in flow.requested_specs
         if spec.artifact == expected.artifact
     )
@@ -3029,7 +3025,6 @@ def summarize_artifact_statuses(artifact_statuses: list[dict[str, Any]]) -> dict
 def build_state_payload(
     client: ClientRecord,
     investigation_id: str,
-    hostname: str,
     request: CollectionRequest,
     artifact_statuses: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -3621,7 +3616,7 @@ def queue_collection(
                 "total": total_artifacts,
             }
         )
-    state = build_state_payload(client, investigation_id, hostname, request, artifact_statuses)
+    state = build_state_payload(client, investigation_id, request, artifact_statuses)
     state["artifact_preflight"] = dict(preflight)
     write_state(investigation_id, hostname, state)
     raise_for_effective_argument_validation(
@@ -3745,7 +3740,6 @@ def _status_payload_unlocked(
     refreshed_state = build_state_payload(
         client,
         investigation_id,
-        hostname,
         request,
         artifact_statuses,
     )
@@ -4101,7 +4095,6 @@ def _ensure_collection_unlocked(
         state = build_state_payload(
             client,
             investigation_id,
-            hostname,
             request,
             artifact_statuses,
         )
@@ -4268,7 +4261,7 @@ def _ensure_collection_unlocked(
             )
         persist_progress(status="running", artifact=expected.label)
 
-    state = build_state_payload(client, investigation_id, hostname, request, artifact_statuses)
+    state = build_state_payload(client, investigation_id, request, artifact_statuses)
     state["queue_progress"] = {
         "status": "complete",
         "artifact": "",
@@ -4305,7 +4298,7 @@ def _ensure_collection_unlocked(
         "action": action,
         "investigation_id": investigation_id,
         **client_identity_payload(client),
-        "request_id": request_id_for_request(request),
+        "request_id": request_id,
         "state_file": state["state_file"],
         "current_state_file": state["current_state_file"],
         "target_collection_type": request.target_collection_type,

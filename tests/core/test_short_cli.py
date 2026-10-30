@@ -1,8 +1,5 @@
 """Synthetic CLI, source-selection and no-mutation contracts."""
-import asyncio
 import hashlib
-import json
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -64,7 +61,7 @@ def test_exact_flow_adoption_reuses_request_in_place(tmp_path, monkeypatch):
     spec = collection.ArtifactSpec("Artifact.Test", "Artifact.Test", {})
     flow = collection.FlowRecord("F.1", "FINISHED", 0, "1", "2", None, [], [spec])
     request = collection.CollectionRequest("custom", [], [spec.artifact], [spec])
-    state = collection.build_state_payload(client, "IR1", "host01", request, [collection.artifact_status_from_flow(spec, flow)])
+    state = collection.build_state_payload(client, "IR1", request, [collection.artifact_status_from_flow(spec, flow)])
     collection.write_state("IR1", "host01", state, update_current_pointer=False)
     state_path = collection.get_request_state_path("IR1", "host01", state["request_id"])
     evidence = state_path.parent / "evidence.jsonl"

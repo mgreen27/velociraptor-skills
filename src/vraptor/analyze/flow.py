@@ -2,8 +2,8 @@
 
 This module deliberately contains no Velociraptor client or analyst-agent calls.
 Host and hunt coordinators own acquisition and execution; this module owns the
-stable identities, terminal-flow classification, logical segmentation and frozen
-best-fit packing shared by both workflows.
+stable identities, terminal-flow classification and logical segmentation shared
+by both workflows.
 """
 
 from __future__ import annotations
@@ -186,15 +186,6 @@ class FlowSource:
             flow_id=self.flow_id,
             artifact=self.artifact,
             source=self.source,
-        )
-
-    @property
-    def compatibility_key(self) -> str:
-        return canonical_json(
-            {
-                "artifact": self.artifact,
-                "source": self.source,
-            }
         )
 
 

@@ -55,7 +55,6 @@ class HydrateVelociraptorExportsTest(unittest.TestCase):
             result = self.module.hydrate_saved_request(
                 mock.sentinel.api,
                 "case-hydrate",
-                investigation_dir,
                 "host01",
                 state_path,
                 force_export=False,

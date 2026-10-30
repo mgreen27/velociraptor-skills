@@ -1160,37 +1160,6 @@ def build_analysis_workload(
     return plan, chunks
 
 
-def build_analysis_plan(
-    api: Any,
-    payload: dict[str, Any],
-    *,
-    collection_type: str,
-    source_aliases: Mapping[str, Mapping[str, Any]] | None = None,
-    limits: analysis_limits.AnalysisLimits,
-    analysis_profile_contract: dict[str, Any] | None = None,
-    artifact_strategies: dict[str, str] | None = None,
-    autoruns_golden_db: Path | None = None,
-    profiles: dict[str, dict[str, Any]] | None = None,
-    query_rows: Callable[[Any, str, str, str], list[dict[str, Any]]] = (
-        collection.query_artifact_source
-    ),
-) -> dict[str, Any]:
-    """Build a no-evidence plan from server rows held only in process memory."""
-    plan, _chunks = build_analysis_workload(
-        api,
-        payload,
-        collection_type=collection_type,
-        source_aliases=source_aliases,
-        limits=limits,
-        analysis_profile_contract=analysis_profile_contract,
-        artifact_strategies=artifact_strategies,
-        autoruns_golden_db=autoruns_golden_db,
-        profiles=profiles,
-        query_rows=query_rows,
-    )
-    return plan
-
-
 def validate_context_worker_result(
     result: Any,
     *,
@@ -1624,65 +1593,6 @@ def validate_context_worker_result(
 
 def _ordered_unique(values: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-
-
-def merge_context_worker_results(
-    results: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Merge compact accepted worker records without building an evidence catalogue."""
-    if not results:
-        raise ValueError("at least one context worker result is required")
-    ordered = sorted(results, key=lambda item: int(item["chunk_index"]))
-    seen_chunks: set[int] = set()
-    expected_chunk_count = int(ordered[0]["chunk_count"])
-    reviewed_rows = 0
-    findings: list[dict[str, Any]] = []
-    context: list[dict[str, Any]] = []
-    explained: list[dict[str, Any]] = []
-    limitations: list[str] = []
-    follow_up: list[str] = []
-    uplift_candidates: list[dict[str, Any]] = []
-
-    for result in ordered:
-        if result.get("protocol") != CONTEXT_WORKER_PROTOCOL:
-            raise ValueError("worker result does not use the line-oriented protocol")
-        if int(result.get("chunk_count", -1)) != expected_chunk_count:
-            raise ValueError("worker results contain inconsistent chunk counts")
-        chunk_index = int(result["chunk_index"])
-        if chunk_index in seen_chunks:
-            raise ValueError(f"duplicate context worker chunk {chunk_index}")
-        seen_chunks.add(chunk_index)
-        reviewed_rows += int(result["row_count"])
-        origin = {
-            "artifact": str(result["artifact"]),
-            "chunk_index": chunk_index,
-        }
-        findings.extend({**origin, **dict(item)} for item in result.get("findings") or [])
-        context.extend(
-            {**origin, **dict(item)} for item in result.get("relevant_context") or []
-        )
-        uplift_candidates.extend(
-            {**origin, **dict(item)} for item in result.get("uplift_candidates") or []
-        )
-        explained.extend(
-            {**origin, **dict(item)} for item in result.get("explained") or []
-        )
-        limitations.extend(result.get("limitations") or [])
-        follow_up.extend(result.get("bounded_follow_up") or [])
-
-    return {
-        "protocol": CONTEXT_WORKER_PROTOCOL,
-        "status": "complete",
-        "reviewed_rows": reviewed_rows,
-        "findings": findings,
-        "relevant_context": context,
-        "uplift_candidates": uplift_candidates,
-        "explained": explained,
-        "limitations": _ordered_unique(limitations),
-        "bounded_follow_up": _ordered_unique(follow_up),
-        "chunk_count": len(seen_chunks),
-        "expected_chunk_count": expected_chunk_count,
-    }
 
 
 def validate_analysis_story(

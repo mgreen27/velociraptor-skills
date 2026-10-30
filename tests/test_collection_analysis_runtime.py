@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
-import re
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -223,8 +222,8 @@ class CollectionAnalysisRuntimeTest(unittest.TestCase):
         self.assertTrue(slash.startswith("Artifact-A--"))
         self.assertRegex(slash, r"--[0-9a-f]{10}$")
         self.assertEqual(
-            analysis_summary.artifact_report_path("Artifact/A").parent.name,
-            "artifact-analysis",
+            analysis_summary.artifact_report_file(Path("reports"), "Artifact/A"),
+            Path("reports") / f"{slash}.md",
         )
 
     def build(self, *, artifact_count: int, rows: list[dict], limit: int):

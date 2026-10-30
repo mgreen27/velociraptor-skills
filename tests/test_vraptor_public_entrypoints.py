@@ -34,7 +34,7 @@ def test_launchers_preserve_dispatch_from_another_directory(tmp_path, launcher, 
     fake_python = repo / ".venv/bin/python3"
     fake_python.parent.mkdir(parents=True)
     fake_python.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$AI_SKILLS_REPO_ROOT" "$VELOCIRAPTOR_SKILLS_REPO_ROOT" "$PYTHONPATH" "$PWD" "$@"\n'
+        '#!/bin/sh\nprintf "%s\\n" "$AI_SKILLS_REPO_ROOT" "$PYTHONPATH" "$PWD" "$@"\n'
     )
     fake_python.chmod(0o755)
     env = {"PATH": os.defpath, "HOME": str(tmp_path / "home")}
@@ -42,7 +42,7 @@ def test_launchers_preserve_dispatch_from_another_directory(tmp_path, launcher, 
         env["PATH"] = str(repo) + os.pathsep + env["PATH"]
     result = subprocess.run([launcher if via_path else str(repo / launcher), *args], cwd=tmp_path, env=env,
                             text=True, capture_output=True, check=True)
-    assert result.stdout.splitlines() == [str(repo), str(repo), str(repo / "src"), str(tmp_path), "-m", "vraptor.cli", *forwarded]
+    assert result.stdout.splitlines() == [str(repo), str(repo / "src"), str(tmp_path), "-m", "vraptor.cli", *forwarded]
 
 
 @pytest.mark.parametrize("command", [("vraptor",), ("dfir",), ("dfir", "velociraptor")])

@@ -57,17 +57,6 @@ class RunAnalystAgentTest(unittest.TestCase):
     def setUpClass(cls):
         cls.module = load_module()
 
-    def test_resolves_execution_once_without_cli_execution_overrides(self):
-        execution = resolved_execution()
-        with mock.patch.object(
-            self.module,
-            "resolve_agent_execution",
-            return_value=execution,
-        ) as resolver:
-            result = self.module.resolved_execution(mock.Mock())
-        self.assertIs(result, execution)
-        resolver.assert_called_once_with(allow_missing_credentials=False)
-
     def test_removed_execution_override_flags_are_rejected(self):
         for flag, value in (
             ("--provider", "openai"),

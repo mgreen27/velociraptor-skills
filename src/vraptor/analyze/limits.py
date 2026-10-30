@@ -243,14 +243,6 @@ class AnalysisLimits:
                 f"Unknown token_encoding {self.token_encoding!r}."
             ) from exc
 
-    @property
-    def maximum_safe_evidence_tokens(self) -> int:
-        return self.maximum_input_tokens - (
-            self.instruction_reserve_tokens
-            + self.prior_context_reserve_tokens
-            + self.safety_reserve_tokens
-        )
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "model_context_tokens": self.model_context_tokens,

@@ -280,8 +280,10 @@ Setup lifecycle/configuration commands emit JSON; runtime failures return 1 and
 argument errors return 2.
 
 `dfir case` and the `dfir-case` executable have been removed. Installed
-entrypoints use the flat commands above. For compatibility, the checkout `./dfir`
-launcher strips the retired `velociraptor` namespace and enters the same Python settings resolver. `collect analyze` may ensure
+entrypoints use the flat commands above. Hunt engine commands such as `check`,
+`ensure`, `stop` and `review-results` run only as `hunt native <command>`; the
+bare `hunt <command>` form prints `Use: vraptor hunt native <command>` and exits 1.
+For compatibility, the checkout `./dfir` launcher strips the retired `velociraptor` namespace and enters the same Python settings resolver. `collect analyze` may ensure
 missing collections; `analyze` only selects existing evidence. Neither publishes
 case-management events.
 

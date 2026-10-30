@@ -126,34 +126,17 @@ def identity_mismatches(
     return mismatches
 
 
-def identities_match(
-    expected: dict[str, Any],
-    actual: dict[str, Any],
-) -> bool:
-    return not identity_mismatches(expected, actual)
-
-
 def classify_state(
     state: Any,
     *,
     terminal_success_states: Iterable[str],
     in_flight_states: Iterable[str],
-    failure_tokens: Iterable[str] = (
-        "FAIL",
-        "ERROR",
-        "CANCEL",
-        "TIMEOUT",
-        "STOP",
-        "ABORT",
-    ),
 ) -> str:
     normalized = str(state or "").strip().upper()
     if normalized in {str(item).upper() for item in terminal_success_states}:
         return TERMINAL_SUCCESS
     if normalized in {str(item).upper() for item in in_flight_states}:
         return IN_FLIGHT
-    if normalized and any(str(token).upper() in normalized for token in failure_tokens):
-        return FAILED_OR_CANCELLED
     if normalized:
         return FAILED_OR_CANCELLED
     return UNKNOWN
