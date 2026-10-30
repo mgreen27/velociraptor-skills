@@ -6,8 +6,8 @@ transport, connection context and case-path resolution have small root modules.
 Runtime assets live together under `resources`.
 `common.sequences.unique_ordered` owns exact-value deduplication for collection,
 hunt and inventory callers, retaining first-seen order and their existing import
-names. Artifact-profile normalization remains separate because it strips values
-and discards empty entries.
+names. Artifact-profile and host-analysis report normalization remain separate
+because they strip values and discard empty entries.
 `common.labels.parse_label_values` owns set-valued server-label parsing for
 readiness and hunt scope matching, retaining both existing module import names.
 Client queries adapt it to a sorted list without empty values.

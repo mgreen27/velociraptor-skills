@@ -2986,11 +2986,7 @@ def promote_analysis_candidates(
         target,
         Path(staged["delta"]),
         dry_run=True,
-        backup_dir=(
-            Path(args.backup_dir).expanduser().resolve()
-            if args.backup_dir
-            else None
-        ),
+        backup_dir=_optional_path(args.backup_dir),
         rmm_reference=args.rmm_reference,
     )
     effective_changes = int(
@@ -3006,11 +3002,7 @@ def promote_analysis_candidates(
             target,
             Path(staged["delta"]),
             dry_run=False,
-            backup_dir=(
-                Path(args.backup_dir).expanduser().resolve()
-                if args.backup_dir
-                else None
-            ),
+            backup_dir=_optional_path(args.backup_dir),
             rmm_reference=args.rmm_reference,
         )
     manifest_path = Path(staged["delta_manifest"])
@@ -3204,16 +3196,8 @@ def import_offline_rules(args: argparse.Namespace) -> dict[str, Any]:
             "Offline Autoruns import requires an existing GoldenDB target: "
             f"{target}"
         )
-    rmm_reference = (
-        Path(args.rmm_reference).expanduser().resolve()
-        if args.rmm_reference
-        else None
-    )
-    backup_dir = (
-        Path(args.backup_dir).expanduser().resolve()
-        if args.backup_dir
-        else None
-    )
+    rmm_reference = _optional_path(args.rmm_reference)
+    backup_dir = _optional_path(args.backup_dir)
     input_reports: list[dict[str, str]] = []
     regex_input_reports: list[dict[str, str]] = []
     exact_rows = _validated_offline_exact_rows(
@@ -3295,6 +3279,10 @@ def import_offline_rules(args: argparse.Namespace) -> dict[str, Any]:
 
 def _paths(values: Iterable[str]) -> list[Path]:
     return [Path(value).expanduser().resolve() for value in values]
+
+
+def _optional_path(value: str | Path | None) -> Path | None:
+    return Path(value).expanduser().resolve() if value else None
 
 
 def parser() -> argparse.ArgumentParser:
@@ -3550,19 +3538,11 @@ def main(argv: list[str] | None = None) -> int:
         result = migrate(args.source, args.output, backup_dir=args.backup_dir, exclude_exact=args.exclude_exact)
     elif args.command == "stage":
         apply_engagement_context(args)
-        args.rmm_reference = (
-            Path(args.rmm_reference).expanduser().resolve()
-            if args.rmm_reference
-            else None
-        )
+        args.rmm_reference = _optional_path(args.rmm_reference)
         result = stage_analysis_candidates(args)
     elif args.command == "promote":
         resolve_promotion_source_args(args)
-        args.rmm_reference = (
-            Path(args.rmm_reference).expanduser().resolve()
-            if args.rmm_reference
-            else None
-        )
+        args.rmm_reference = _optional_path(args.rmm_reference)
         result = promote_analysis_candidates(args, resolve_context=True)
     elif args.command == "import":
         result = import_offline_rules(args)
@@ -3571,11 +3551,7 @@ def main(argv: list[str] | None = None) -> int:
             args.db,
             REPO_ROOT,
         )
-        rmm_reference = (
-            Path(args.rmm_reference).expanduser().resolve()
-            if args.rmm_reference
-            else None
-        )
+        rmm_reference = _optional_path(args.rmm_reference)
         version = DEFAULT_TOOL_VERSION
         with velociraptor_api.VeloApiClient(
             dfir_paths.resolve_velociraptor_api_client_path(
@@ -3601,16 +3577,8 @@ def main(argv: list[str] | None = None) -> int:
             ),
             Path(args.diff).expanduser().resolve(),
             dry_run=bool(args.dry_run),
-            backup_dir=(
-                Path(args.backup_dir).expanduser().resolve()
-                if args.backup_dir
-                else None
-            ),
-            rmm_reference=(
-                Path(args.rmm_reference).expanduser().resolve()
-                if args.rmm_reference
-                else None
-            ),
+            backup_dir=_optional_path(args.backup_dir),
+            rmm_reference=_optional_path(args.rmm_reference),
         )
     elif args.command == "remove":
         result = remove_hashes(
@@ -3620,11 +3588,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             args.hash,
             category=args.category,
-            rmm_reference=(
-                Path(args.rmm_reference).expanduser().resolve()
-                if args.rmm_reference
-                else None
-            ),
+            rmm_reference=_optional_path(args.rmm_reference),
         )
     elif args.command == "build":
         if not args.input and not args.regex_input:
@@ -3634,11 +3598,7 @@ def main(argv: list[str] | None = None) -> int:
             _paths(args.input),
             replace=bool(args.replace),
             exclude_hashes=load_hashes(_paths(args.exclude_hashes)),
-            rmm_reference=(
-                Path(args.rmm_reference).expanduser().resolve()
-                if args.rmm_reference
-                else None
-            ),
+            rmm_reference=_optional_path(args.rmm_reference),
             baseline_databases=_paths(args.baseline_db),
             regex_inputs=_paths(args.regex_input),
         )
@@ -3647,11 +3607,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.output).expanduser().resolve(),
             _paths(args.input),
             replace=bool(args.replace),
-            rmm_reference=(
-                Path(args.rmm_reference).expanduser().resolve()
-                if args.rmm_reference
-                else None
-            ),
+            rmm_reference=_optional_path(args.rmm_reference),
         )
     elif args.command == "inspect":
         result = validate_database(
@@ -3659,11 +3615,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.db,
                 REPO_ROOT,
             ),
-            rmm_reference=(
-                Path(args.rmm_reference).expanduser().resolve()
-                if args.rmm_reference
-                else None
-            ),
+            rmm_reference=_optional_path(args.rmm_reference),
         )
     elif args.command == "lookup":
         database = dfir_paths.resolve_autoruns_golden_db(
@@ -3707,32 +3659,16 @@ def main(argv: list[str] | None = None) -> int:
         result = filter_autoruns_inputs(
             database,
             inputs=_paths(args.input or []),
-            manifest=(
-                Path(args.manifest).expanduser().resolve()
-                if args.manifest
-                else None
-            ),
-            output=(
-                Path(args.output).expanduser().resolve()
-                if args.output
-                else None
-            ),
-            output_dir=(
-                Path(args.output_dir).expanduser().resolve()
-                if args.output_dir
-                else None
-            ),
+            manifest=_optional_path(args.manifest),
+            output=_optional_path(args.output),
+            output_dir=_optional_path(args.output_dir),
         )
     elif args.command == "publish":
         database = dfir_paths.resolve_autoruns_golden_db(
             args.db,
             REPO_ROOT,
         )
-        rmm_reference = (
-            Path(args.rmm_reference).expanduser().resolve()
-            if args.rmm_reference
-            else None
-        )
+        rmm_reference = _optional_path(args.rmm_reference)
         version = str(args.tool_version or "").strip() or DEFAULT_TOOL_VERSION
         with velociraptor_api.VeloApiClient(
             dfir_paths.resolve_velociraptor_api_client_path(

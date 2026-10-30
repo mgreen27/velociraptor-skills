@@ -13,7 +13,11 @@ not generated inventory, CSV, or resolved-policy exports.
 | `windows-lolbins.json` | Windows LOLBin reference data used during deterministic enrichment. |
 | `windows-rmm-greyware.json` | Windows remote-management and greyware reference data used during deterministic enrichment. |
 | `autoruns/` | Read-only GoldenDB schema and VQL templates. |
+| `contracts/` | JSON contracts loaded by the runtime (DetectRaptor analysis, Linux host profile, persistence policy, detached-evidence manifest) and the host-analysis and hunting mode and ownership matrices cited by the docs and hunting skill. |
 | `golden/` | Canonical reviewed Autoruns CSV, generated runtime database and maintenance instructions, also included in standalone installations. |
+| `profiles/` | `profiles.toml`: analysis intents and `rapid`, `standard` and `deep` response depths, loaded by `agent/profiles.py`. |
+| `scripts/` | Shell helpers: `prep_dfir_tools.sh` for `tools prep`, `load_repo_env.sh`, and the `velociraptor/` setup, mapped-client and remote-configuration scripts. |
+| `templates/` | `investigation-agents.md`, rendered into a new case's `AGENTS.md` by `setup init`. |
 | `vql/` | Packaged bounded VQL templates used by collection and export workflows. |
 
 ## Managing artifact policy

@@ -15,9 +15,10 @@ Use the shared installer through:
 vraptor tools prep [OPTIONS]
 ```
 
-Use the installed command from the activated environment below. In `ai_skills`,
-the repository launcher `./vraptor` is also available. The implementation lives
-under `packages/vraptor`. Keep this skill documentation-only.
+Use the installed command from the activated environment below. In a source
+checkout, the repository launcher `./vraptor` is also available. The
+implementation is the `vraptor` Python package; keep this skill
+documentation-only.
 
 ## Install the Generic Package
 
@@ -27,8 +28,8 @@ Interactive `vraptor setup configure` saves operational settings and offers the
 AI wizard; setting-value flags skip those questions. This skill covers package
 and native tool preparation details.
 
-Use Python 3.11 or newer. Start in the exported `velociraptor-skills` checkout
-root containing `pyproject.toml`:
+Use Python 3.11 or newer. Start in the source checkout root; these commands
+assume the package's `pyproject.toml` is at that root:
 
 ```bash
 python3 -m venv .venv
@@ -38,10 +39,13 @@ vraptor --help
 vraptor tools prep --help
 ```
 
-From the `ai_skills` root, keep `.venv` there and replace the pip command with
-`.venv/bin/python -m pip install ./packages/vraptor`. Existing environments can
-be reused. For a supplied wheel, install its local path instead of the source
-directory. Do not assume the package is published on PyPI.
+When the checkout keeps `pyproject.toml` in a package subdirectory instead,
+keep `.venv` at the checkout root and replace the pip target `.` with that
+subdirectory's relative path; the
+[installation guide](../../docs/vraptor-installation.md#1-install-the-package)
+gives the exact target for each checkout. Existing environments can be reused.
+For a supplied wheel, install its local path instead of the source directory.
+Do not assume the package is published on PyPI.
 
 The base package installs the `vraptor` command and core API dependencies. It
 does not install the native Velociraptor executable, link agent skills, or start
@@ -50,8 +54,8 @@ or AI setup.
 
 Install an optional extra only for the chosen analyst provider by replacing the
 pip target above with `'.[ai]'`, `'.[azure]'`, `'.[anthropic]'` or `'.[claude]'`
-for OpenAI, Azure, Anthropic Messages or Claude managed login respectively. In
-`ai_skills`, use the corresponding `'./packages/vraptor[EXTRA]'` target. Configure
+for OpenAI, Azure, Anthropic Messages or Claude managed login respectively. For a
+package subdirectory, append the extra to that path (`'SUBDIR[EXTRA]'`). Configure
 the analyst through the optional AI section of `vraptor setup configure`, or
 directly with `vraptor ai setup` later.
 

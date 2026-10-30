@@ -351,6 +351,8 @@ class FlakyDetectionApi(FakeFlowApi):
         mode = self.failures.get(key, []).pop(0) if self.failures.get(key) else ""
         if mode == "before":
             raise FakeTransportError(grpc.StatusCode.UNAVAILABLE)
+        if mode == "cancel":
+            raise FakeTransportError(grpc.StatusCode.CANCELLED)
         for batch in super().query_batches_with_metadata(vql, env, **kwargs):
             if mode == "mid" and batch.rows:
                 first = [dict(batch.rows[0])]
@@ -2346,6 +2348,140 @@ class FlowAnalysisTest(unittest.TestCase):
         self.assertEqual(second_api.attempts["groups:Rule"], 1)
         self.assertEqual(second_api.attempts["context:Rule"], 1)
         self.assertEqual(result["accounted_row_count"], 1_100)
+
+    def test_detectraptor_retry_checkpoint_keeps_diagnostic_shape(self):
+        artifact = flow_analysis_runtime.DETECTRAPTOR_EVTX_ARTIFACT
+        census_rows = [
+            {"Detection": {"Name": "Census"}, "Message": "repeat"}
+            for _index in range(1_001)
+        ]
+        context_rows = [
+            {"Detection": {"Name": "Rule"}, "Message": "common"}
+            for _index in range(1_100)
+        ]
+
+        def select_group(*, work_items, **_kwargs):
+            for work in work_items:
+                chunk = dict(work["chunk"])
+                source_rows = dict(work["source_rows"])
+                ref = sorted(source_rows)[0]
+                yield {
+                    "status": "accepted",
+                    "chunk_id": str(dict(work["manifest"])["chunk_id"]),
+                    "attempts": 1,
+                    "result": {
+                        "task_id": chunk["task_id"],
+                        "artifact": chunk["artifact"],
+                        "status": "complete",
+                        "coverage": {
+                            "planned_rows": chunk["row_count"],
+                            "reviewed_rows": chunk["row_count"],
+                        },
+                        "answer": "Selected exact group.",
+                        "findings": [
+                            {
+                                "id": "F1",
+                                "summary": "Requires validation.",
+                                "confidence": "medium",
+                                "domains": ["execution"],
+                                "evidence": [
+                                    {
+                                        "artifact": chunk["artifact"],
+                                        "ref": ref,
+                                        "fields": dict(source_rows[ref]),
+                                    }
+                                ],
+                            }
+                        ],
+                        "relevant_context": [],
+                        "limitations": [],
+                        "bounded_follow_up": [],
+                    },
+                }
+
+        def interrupted(rows, failures, streaming=None):
+            api = FlakyDetectionApi(
+                [flow_row("C.1", "F.1", artifact=artifact)],
+                {("C.1", "F.1"): rows},
+                failures=failures,
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with self.assertRaises(FakeTransportError):
+                    self.run_analysis(
+                        api, root, artifact=artifact, streaming=streaming
+                    )
+                state = json.loads(
+                    (root / "analysis" / "hunt-analysis-state.json").read_text()
+                )
+            record = state["detectraptor_recovery"]["partitions"][0]
+            for item in record["transport_errors"]:
+                self.assertEqual(item["error_class"], "FakeTransportError")
+                self.assertIsInstance(item.pop("elapsed_seconds"), float)
+            for item in record["query_diagnostics"]:
+                self.assertIsInstance(item.pop("elapsed_seconds"), float)
+            return api, record
+
+        def failure(stage, attempt, status, delay, rows_received=0):
+            item = {
+                "stage": stage,
+                "attempt": attempt,
+                "status": status,
+                "error_class": "FakeTransportError",
+                "rows_received": rows_received,
+            }
+            if delay is not None:
+                item["retry_delay_seconds"] = delay
+            return item
+
+        def success(stage, rows_received):
+            return {
+                "stage": stage,
+                "attempt": 1,
+                "status": "succeeded",
+                "rows_received": rows_received,
+            }
+
+        delays = [2.0, 5.0, 15.0, None]
+        with self.subTest("census exhausts retries"):
+            _api, record = interrupted(
+                census_rows, {"census:Census": ["before"] * 4}
+            )
+            expected = [
+                failure("census", attempt, "UNAVAILABLE", delay)
+                for attempt, delay in enumerate(delays, start=1)
+            ]
+            self.assertEqual(record["transport_errors"], expected)
+            self.assertEqual(record["query_diagnostics"], expected)
+
+        with self.subTest("non-retryable census falls back without diagnostics"):
+            api, record = interrupted(
+                census_rows,
+                {"census:Census": ["cancel"], "direct:Census": ["before"] * 4},
+            )
+            expected = [
+                failure("initial_analysis", attempt, "UNAVAILABLE", delay)
+                for attempt, delay in enumerate(delays, start=1)
+            ]
+            self.assertEqual(api.attempts["census:Census"], 1)
+            self.assertEqual(record["transport_errors"], expected)
+            self.assertEqual(record["query_diagnostics"], expected)
+
+        with self.subTest("non-retryable context is recorded and raised"):
+            api, record = interrupted(
+                context_rows, {"context:Rule": ["cancel"]}, select_group
+            )
+            expected = failure("context_hydration", 1, "CANCELLED", 2.0)
+            self.assertEqual(api.reconnect_count, 0)
+            self.assertEqual(record["transport_errors"], [expected])
+            self.assertEqual(
+                record["query_diagnostics"],
+                [
+                    success("census", 1),
+                    success("initial_analysis", 1),
+                    expected,
+                ],
+            )
 
     def test_detectraptor_group_query_failure_preserves_progress_report(self):
         artifact = flow_analysis_runtime.DETECTRAPTOR_EVTX_ARTIFACT

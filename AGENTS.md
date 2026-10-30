@@ -22,7 +22,8 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
 - Repository-owned, not synchronized: this file, `CLAUDE.md`, `README.md`,
   `CONFIG.md`, `.claude-plugin/`, `.github/`, `pytest.ini`, `ruff.toml`,
   `utils/check.sh`, the skill linkers, `docs/vraptor-installation.md`,
-  `docs/reference/skill-resource-ownership.md` and the sync and export tools.
+  `docs/maintainers.md`, `docs/reference/skill-resource-ownership.md` and the
+  sync and export tools.
 
 ## Layout
 

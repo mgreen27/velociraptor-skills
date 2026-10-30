@@ -5,6 +5,7 @@
 # public_path	reason
 .codex/agents/hunt-agent.toml	Public Codex hunt agent adaptation.
 docs/model-execution.md	AI setup defaults kept per repository (owner decision 2026-10-30).
+skills/velociraptor-engagement-setup/references/configuration.md	AI setup defaults kept per repository (owner decision 2026-10-30).
 skills/velociraptor-host-analysis/SKILL.md	The incident-response guidebook PDF is not exported.
 skills/velociraptor-mapped-client/SKILL.md	AI setup defaults kept per repository (owner decision 2026-10-30).
 src/vraptor/agent/manage.py	AI setup defaults kept per repository (owner decision 2026-10-30).

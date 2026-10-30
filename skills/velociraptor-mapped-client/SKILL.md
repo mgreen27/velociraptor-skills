@@ -1,42 +1,38 @@
 ---
 name: velociraptor-mapped-client
-description: Create, supervise, validate, and inspect a read-only Velociraptor mapped client for a local E01/raw image or mounted Windows volume, including enrollment with a remote Velociraptor server. Use when offline evidence must appear as a stable client with a verified client id, LastSeen, supervisor, remap, and API-visible identity.
+description: Create, supervise, validate, and inspect a read-only Velociraptor mapped client for an E01/raw image, mounted Windows volume, or KapeFiles collection, locally or with a remote server, with a verified client id, LastSeen, supervisor, remap, and API-visible identity. Use for low-level mapping when velociraptor-engagement-setup is not used.
 ---
 
 # Velociraptor Mapped Client
 
-**Required server prerequisite:** follow the shared
-[DetectRaptor bootstrap](../../docs/reference/detectraptor-bootstrap.md)
-for every new local server and connected live/remote server. If the live catalog
-contains no `DetectRaptor.` artifacts, run `Server.Import.Extras` with the
-DetectRaptor CSV row and verify installation before proceeding. Reuse a successful
-session check; a failed import blocks the workflow. Explicit read-only/no-import
-instructions and offline-only work retain their scope.
-
-The standalone `vraptor` CLI uses the same case paths and configuration. Use
-`vraptor analyze --flow F.ID --client C.ID --id ID` or
-`vraptor analyze --hunt H.ID --id ID` for existing evidence only. Collection,
-client retries and GoldenDB uploads remain explicit. Operational routes from the
-former `dfir` CLI keep their behavior under `vraptor`. See the [shared CLI contract](../../docs/contracts/cli.md).
+**Server prerequisite:** complete the [DetectRaptor bootstrap](../../docs/reference/detectraptor-bootstrap.md) for each new local or connected live/remote server before server work; a failed import blocks the workflow.
 
 Use this skill to expose local dead-disk evidence through Velociraptor without
-modifying the evidence source.
+modifying the evidence source. Use the shared `vraptor` CLI; `vraptor analyze`
+only reuses existing evidence. See the [shared CLI contract](../../docs/contracts/cli.md).
 
-Apply the shared
-[Velociraptor operation authorization policy](../../docs/reference/velociraptor-operation-authorization.md).
-Use the shared
-[server-profile and engagement context](../../docs/reference/velociraptor-engagement-context.md).
+Read the shared
+[Velociraptor operation authorization policy](../../docs/reference/velociraptor-operation-authorization.md)
+before any `--provision-api`, `--provision-client` or `--regenerate-remote-api`
+use or other server mutation, and the shared
+[server-profile and engagement context](../../docs/reference/velociraptor-engagement-context.md)
+when choosing `--server-profile`, case paths or readiness.
 
 The implementation is shared under `src/vraptor`. Do not add runtime
 scripts under this skill directory.
 
 ## Required Inputs
 
-- an existing E01/raw image, mounted Windows volume, or extracted Velociraptor export
+- an existing E01/raw image, mounted Windows volume, extracted Velociraptor
+  export, or Velociraptor KapeFiles collection ZIP
 - a working local Velociraptor executable, selected in operational TOML,
-  with `VELO_BIN`, or with `--velociraptor-bin`
+  with `VELO_BIN`, or with `--velociraptor-bin`; install it when missing with
+  `vraptor tools prep -t velociraptor`
 - the API client and matching endpoint configuration for an existing server,
-  or selection of managed local-server setup
+  or selection of managed local-server setup. Use explicit configuration names
+  such as `~/.config/velociraptor/dfir_api_client.yaml` and
+  `~/.config/velociraptor/dfir_client.config.yaml`; do not silently substitute
+  an unrelated `ir*` configuration
 - an optional unique mapped-client hostname; managed setup derives a stable
   name when omitted
 
@@ -94,67 +90,11 @@ vraptor setup start --mode local-deaddisk --id example --mapping-id kapefiles \
   --evidence-path /evidence/collection.zip --hostname example-kapefiles
 ```
 
-Validate with `.venv/bin/python -m pytest tests/test_zip_mapping.py tests/test_export_mapping.py`.
-Native binary tests skip when unavailable; AES fixture tests require `7z`.
-
-### VQL mapping generation and notebook use
-
-`src/vraptor/resources/vql/kapefiles_zip_remapping.vql`
-generates the filesystem and registry rules from the validated inventory.
-Python retains archive validation, source hashing, password-file checks and the
-client lifecycle; it no longer constructs the mount rules. The VQL inputs are
-`RecordsFile`, `BaseFile`, `EvidencePath`, and `MountScope` (a VQL statement
-referencing the protected password file, never the password itself).
-Preparation consumes the emitted YAML and verifies mapped reads before publishing.
-Existing bound remaps remain unchanged on resume.
-
-For notebook or query-local analysis, install that generated YAML directly:
-
-```vql
-LET Mapping <= parse_yaml(filename="/runtime/remapping.yaml")
-LET Applied <= remap(config=Mapping)
-SELECT Name FROM glob(globs="HKEY_LOCAL_MACHINE/System/*", accessor="registry") LIMIT 3
-```
-
-`remap()` applies to the current query scope. A persistent virtual client uses
-the same YAML through `--remap`, so subsequent server collections use these
-VQL-generated mappings. No import or up-front extraction is required.
-
-### ZIP mapping performance
-
-No up-front full extraction or permanent evidence working copy is required.
-This does not mean zero temporary disk usage: the native ZIP accessor streams
-sequential reads, but can decompress a member into a temporary backing file
-when a parser seeks. An encrypted outer `data.zip` can therefore require
-substantial temporary space for the inner archive, in addition to parsed members.
-
-Large registry hives, database files and MFT parsing can be more expensive than
-reading extracted files. Repeated collections and concurrent parsers can repeat
-work or increase temporary disk, CPU and memory demand; do not assume a shared
-cache eliminates it. Startup/resume also hashes the entire source ZIP for
-identity validation. Archive entry inventory is held in memory.
-
-Prefer local SSD storage, adequate temporary disk space, narrow artifact scopes
-and conservative concurrency. For repeated broad analysis, compare representative
-ZIP and extracted-folder runs before choosing an input. Record elapsed time,
-CPU, peak memory and temporary disk use. The mapping smoke tests prove correctness,
-not throughput or maximum supported archive size. No automatic extraction fallback
-or performance threshold is configured.
-
-Use explicit configuration names such as:
-
-- `~/.config/velociraptor/dfir_api_client.yaml`
-- `~/.config/velociraptor/dfir_client.config.yaml`
-
-Do not silently substitute an unrelated `ir*` configuration.
-
-Install the binary when it is missing:
-
-```bash
-vraptor tools prep -t velociraptor
-```
-
-Do not request local GUI workspace initialization for a remote mapped client.
+ZIP input needs no up-front extraction but can still use substantial temporary
+disk, CPU and memory. Read [KapeFiles ZIP mapping internals](references/kapefiles-zip.md)
+before notebook or query-local remapping, changing the VQL mapping generator,
+choosing between ZIP and extracted input for repeated broad analysis, or
+validating ZIP mapping changes.
 
 ## Prepare Remote Configuration
 
@@ -183,6 +123,8 @@ vraptor config fetch-client \
 Generating missing remote files additionally requires `--provision-api` or
 `--provision-client` on the respective helper. A transport or permission failure
 does not authorize generation or replacement.
+
+Do not request local GUI workspace initialization for a remote mapped client.
 
 ## Create And Verify
 
