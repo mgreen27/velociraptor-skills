@@ -29,6 +29,7 @@ from vraptor.agent.config import analyst_execution_identity
 from vraptor.agent.config import analyst_execution_metadata
 from vraptor.agent.config import resolve_agent_execution
 from vraptor.agent.factory import create_agent_runner
+from vraptor.agent.profiles import normalize_profile_name
 from vraptor.analyze.scheduler import DynamicAnalysisQueue
 from vraptor.analyze.scheduler import SchedulerStatus
 from vraptor.common.hashing import sha256_file
@@ -314,7 +315,9 @@ def publish_host_artifact_reports(
         content = source.read_bytes()
         if not artifact or hashlib.sha256(content).hexdigest() != entry.get("report_sha256"):
             raise ValueError(f"Artifact report integrity check failed: {source}")
-        destination = paths["host_artifact_reports_dir"] / f"{analysis_summary.safe_artifact_name(artifact)}.md"
+        destination = analysis_summary.artifact_report_file(
+            paths["host_artifact_reports_dir"], artifact
+        )
         if not destination.is_file() or destination.read_bytes() != content:
             atomic_io.write_text_atomic(destination, content.decode("utf-8"), newline="")
         published[artifact] = str(destination)
@@ -414,8 +417,9 @@ def render_cumulative_host_memory(
                 reports, key=lambda item: str(item.get("artifact") or "")
             ):
                 report_file = str(artifact_record.get("report_file") or "")
-                current_report = paths["host_artifact_reports_dir"] / (
-                    f"{analysis_summary.safe_artifact_name(str(artifact_record.get('artifact') or ''))}.md"
+                current_report = analysis_summary.artifact_report_file(
+                    paths["host_artifact_reports_dir"],
+                    str(artifact_record.get("artifact") or ""),
                 )
                 if current_report.is_file() and sha256_file(current_report) == artifact_record.get("report_sha256"):
                     report_file = str(current_report)
@@ -753,7 +757,7 @@ def analysis_cache_identity(
     identity = {
         "schema_version": ANALYSIS_CACHE_IDENTITY_SCHEMA_VERSION,
         "question": question.strip(),
-        "task_mode": collection_analysis_profiles.normalize_task_mode(
+        "task_mode": normalize_profile_name(
             getattr(args, "task_mode", "host-forensics")
         ),
         "response_depth": collection_analysis_profiles.response_depth_policy(
@@ -778,14 +782,11 @@ def analysis_cache_identity(
     ).hexdigest()
 
 
-def artifact_analysis_key(
-    item: dict[str, Any],
-    analysis_identity: str = "",
-) -> str:
+def artifact_analysis_key(item: dict[str, Any]) -> str:
     identity = {
         "artifact": str(item.get("artifact") or item.get("artifact_name") or ""),
         "flow_id": str(item.get("flow_id") or ""),
-        "analysis_identity": analysis_identity,
+        "analysis_identity": "",
     }
     return hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1247,7 +1248,6 @@ async def _execute_incremental_analysis(
     shared_execute: Any,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Analyze terminal flows with one durable checkpoint per logical artifact."""
-    route = spec.route
     state_lock = threading.RLock()
     debug_lock = threading.Lock()
     debug_enabled = bool(getattr(args, "debug", False))
@@ -1481,9 +1481,8 @@ async def _execute_incremental_analysis(
                 ),
                 artifact_plan,
             )
-            report_path = (
-                paths["artifact_reports_dir"]
-                / f"{analysis_summary.safe_artifact_name(name)}.md"
+            report_path = analysis_summary.artifact_report_file(
+                paths["artifact_reports_dir"], name
             )
             atomic_io.write_text_atomic(
                 report_path,
@@ -1574,9 +1573,8 @@ async def _execute_incremental_analysis(
             "exposed_rows": int(item.get("total_rows") or 0),
         }
         full_result["result_role"] = "provisional_candidates"
-        report_path = (
-            paths["artifact_reports_dir"]
-            / f"{analysis_summary.safe_artifact_name(name)}.md"
+        report_path = analysis_summary.artifact_report_file(
+            paths["artifact_reports_dir"], name
         )
         atomic_io.write_text_atomic(
             report_path,
@@ -1662,9 +1660,8 @@ async def _execute_incremental_analysis(
                 failure_result,
                 {"time_filter": failure_time_filter},
             )
-            report_path = (
-                paths["artifact_reports_dir"]
-                / f"{analysis_summary.safe_artifact_name(name)}.md"
+            report_path = analysis_summary.artifact_report_file(
+                paths["artifact_reports_dir"], name
             )
             atomic_io.write_text_atomic(
                 report_path,
@@ -1735,9 +1732,8 @@ async def _execute_incremental_analysis(
                 )
                 artifact_root = paths["artifact_reports_dir"].resolve()
                 for reset_name in reset_names:
-                    report_path = (
-                        artifact_root
-                        / f"{analysis_summary.safe_artifact_name(reset_name)}.md"
+                    report_path = analysis_summary.artifact_report_file(
+                        artifact_root, reset_name
                     ).resolve()
                     if report_path.parent == artifact_root:
                         report_path.unlink(missing_ok=True)
@@ -2087,7 +2083,6 @@ async def run_analysis_async(
             "or --plan-only/--skip-ai"
         )
     selected_client: Any = None
-    chunk_csv: dict[int, str] = {}
     rebuild_only = bool(getattr(args, "rebuild_host_summary", False))
     if model_options.supplied(args):
         selected = getattr(args, "_cli_model_execution", None)

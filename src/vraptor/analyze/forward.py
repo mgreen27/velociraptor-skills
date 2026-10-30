@@ -69,10 +69,6 @@ def build_saved_request_command(
     return command
 
 
-def _sha256(path: Path) -> str:
-    return sha256_file(path)
-
-
 def validate_forward_outputs(
     result: dict[str, Any],
     *,
@@ -145,7 +141,7 @@ def validate_forward_outputs(
     if str(checkpoint.get("checkpoint_fingerprint") or "") != expected_checkpoint_fingerprint:
         raise RuntimeError("request checkpoint fingerprint does not validate")
     synthesis = dict(state.get("synthesis") or {})
-    if str(synthesis.get("request_checkpoint_sha256") or "") != _sha256(
+    if str(synthesis.get("request_checkpoint_sha256") or "") != sha256_file(
         paths["request_checkpoint_file"]
     ):
         raise RuntimeError("host state does not reference the durable request checkpoint")
@@ -158,8 +154,8 @@ def validate_forward_outputs(
         if marker in durable_text:
             raise RuntimeError(f"durable forward state contains raw evidence marker {marker}")
 
-    checkpoint_hash = _sha256(paths["request_checkpoint_file"])
-    host_report_hash = _sha256(paths["host_report_file"])
+    checkpoint_hash = sha256_file(paths["request_checkpoint_file"])
+    host_report_hash = sha256_file(paths["host_report_file"])
     final_report = paths["host_report_file"].read_text(encoding="utf-8")
     if "Provisional running report" in final_report:
         raise RuntimeError("canonical host report remained provisional")
@@ -178,7 +174,7 @@ def validate_forward_outputs(
             raise RuntimeError(f"artifact report escaped or is missing for {artifact}")
         if reported_files.get(artifact) != report_path:
             raise RuntimeError(f"stdout omitted or changed artifact report for {artifact}")
-        if str(artifact_result.get("report_sha256") or "") != _sha256(report_path):
+        if str(artifact_result.get("report_sha256") or "") != sha256_file(report_path):
             raise RuntimeError(f"artifact report hash does not validate for {artifact}")
     failed_artifacts = [
         str(artifact or "")

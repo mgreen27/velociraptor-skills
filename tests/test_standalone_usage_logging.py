@@ -19,7 +19,7 @@ from vraptor.logging import operations
 def test_standalone_counts_real_runner_attempt_and_preserves_stdout(tmp_path, monkeypatch, capsys, failure):
     module = load_module()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    monkeypatch.setattr(module, "resolved_execution", lambda *a, **kw: resolved_execution())
+    monkeypatch.setattr(module, "resolve_agent_execution", lambda *a, **kw: resolved_execution())
     adapter = FakeAdapter([AgentProviderException(AgentError("authentication", "Synthetic failure"))]) if failure else FakeAdapter()
     monkeypatch.setattr(module, "create_agent_runner", lambda *a, **kw: ApiAgentRunner(
         adapter, retry_policy=RetryPolicy(max_retries=0), persist_runtime_files=False,

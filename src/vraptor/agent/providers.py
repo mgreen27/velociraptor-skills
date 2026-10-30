@@ -349,7 +349,6 @@ class OpenAIResponsesAdapter(_BaseAdapter):
         return ProviderCapabilities(
             structured_output=True,
             json_mode=True,
-            tool_calling=True,
             reasoning_configuration=True,
             request_output_token_limit=True,
         )
@@ -628,9 +627,7 @@ class CodexAppServerAdapter(_BaseAdapter):
         return ProviderCapabilities(
             structured_output=True,
             json_mode=True,
-            remote_cancellation=True,
             reasoning_configuration=True,
-            tool_calling=False,
         )
 
     async def _client(self) -> Any:

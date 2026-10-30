@@ -9,6 +9,7 @@ from unittest import mock
 
 from vraptor.autoruns import pipeline as autoruns
 from vraptor.hunt import live
+from tests.autoruns_vql_oracles import autoruns_accounting_vql
 
 BINARY = Path(resolve_velociraptor_binary(None, Path(__file__).resolve().parents[1]))
 
@@ -30,7 +31,7 @@ class AutorunsAccountingParityTest(unittest.TestCase):
             image_path=r"C:\exact.exe", launch_string="", signer="")], env=env)
         where = f"NOT ({selected})"
         with mock.patch.object(live, "source_vql", return_value="TestRows"):
-            queries = [live.autoruns_accounting_vql(where), live.autoruns_residual_stack_vql(where)]
+            queries = [autoruns_accounting_vql(where), live.autoruns_residual_stack_vql(where)]
         for rows in (source_rows, list(reversed(source_rows)), [], [row(""), row("")],
                      [row(r"C:\exact.exe")]):
             outputs = []

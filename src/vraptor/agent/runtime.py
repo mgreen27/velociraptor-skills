@@ -42,11 +42,6 @@ class ProviderCapabilities:
     streaming: bool = True
     structured_output: bool = False
     json_mode: bool = False
-    remote_cancellation: bool = False
-    background_execution: bool = False
-    stored_response_retrieval: bool = False
-    tool_calling: bool = False
-    usage_reporting: bool = True
     reasoning_configuration: bool = False
     request_output_token_limit: bool = False
     stateless_operation: bool = True

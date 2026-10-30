@@ -364,7 +364,7 @@ def test_supported_report_routes_resolve_saved_policy_without_overrides(tmp_path
     assert reporting.active_policy() is None
 
 
-@pytest.mark.parametrize("command", [["hunt", "review-results"], ["hunt", "native", "review-results"], ["hunt", "status"]])
+@pytest.mark.parametrize("command", [["hunt", "native", "review-results"], ["hunt", "status"]])
 def test_query_only_hunt_routes_do_not_require_model_configuration(command):
     with patch("vraptor.agent.sources.load_document", side_effect=AssertionError("read config")):
         assert reporting.run_with_policy(command, lambda args: args) == command

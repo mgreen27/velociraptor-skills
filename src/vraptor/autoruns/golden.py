@@ -1007,7 +1007,7 @@ def validate_database(
         version = metadata(probe).get("schema_version")
     if version in {"7", "8", "9", "10"}:
         from vraptor.autoruns.regex_store import report
-        return report(path, rmm_reference=rmm_reference)
+        return report(path)
     classifier = RmmClassifier(rmm_reference)
     connection = connect_database(path, readonly=True)
     try:
@@ -3162,7 +3162,6 @@ def _validated_offline_exact_rows(
 def _validated_offline_regex_rows(
     inputs: Iterable[Path],
     *, input_reports: list[dict[str, str]] | None = None,
-    rmm_reference: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Load reviewed paired regex rules and reject duplicates."""
 
@@ -3239,7 +3238,7 @@ def import_offline_rules(args: argparse.Namespace) -> dict[str, Any]:
         input_reports=input_reports,
     )
     regex_rows = _validated_offline_regex_rows(
-        regex_inputs, input_reports=regex_input_reports, rmm_reference=rmm_reference,
+        regex_inputs, input_reports=regex_input_reports,
     )
     with tempfile.TemporaryDirectory(
         prefix="autoruns-golden-import-"

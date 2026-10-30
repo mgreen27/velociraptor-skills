@@ -12,6 +12,7 @@ from unittest import mock
 from vraptor.autoruns import pipeline as autoruns
 from vraptor.hunt import live
 from vraptor.logging import operations as operation_log
+from tests.autoruns_vql_oracles import autoruns_accounting_vql
 
 BINARY = Path(resolve_velociraptor_binary(None, Path(__file__).resolve().parents[1]))
 
@@ -45,7 +46,7 @@ class AutorunsDiagnosticsTest(unittest.TestCase):
                 {'Image Path': '', 'Launch String': '', 'Keep': True},
                 {'Image Path': '', 'Launch String': 'cmd /c x', 'Keep': True}]
         with mock.patch.object(live, 'source_vql', return_value='TestRows'):
-            query = live.autoruns_accounting_vql('Keep')
+            query = autoruns_accounting_vql('Keep')
         prefix = ('LET TestRows = SELECT * FROM foreach(row=parse_json_array(data=Rows))\n')
         result = subprocess.run([str(BINARY), 'query', '--format=jsonl',
                                  '--env', 'Rows=' + json.dumps(rows), prefix + query],

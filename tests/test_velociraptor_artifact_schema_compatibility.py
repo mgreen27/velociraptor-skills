@@ -12,7 +12,6 @@ from unittest import mock
 
 import vraptor
 from vraptor.artifacts import policy as artifact_policy
-from vraptor.artifacts import profiles as artifact_profiles
 from vraptor.artifacts import schema as artifact_schema_compatibility
 from vraptor import legacy_cli as cli
 

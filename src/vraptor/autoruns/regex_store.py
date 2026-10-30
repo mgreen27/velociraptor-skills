@@ -48,7 +48,7 @@ def records(connection):
     return [dict(r) for r in connection.execute("SELECT * FROM autoruns_regex_rules ORDER BY category_regex,image_path_regex,launch_string_regex,signer_regex")]
 
 
-def load(path, *, rmm_reference=None, allow_legacy=False):
+def load(path, *, allow_legacy=False):
     from vraptor.autoruns import golden
     path = Path(path).expanduser().resolve()
     golden._require_standalone_database(path)
@@ -106,8 +106,8 @@ def load(path, *, rmm_reference=None, allow_legacy=False):
                 records=stored, matching_policy=autoruns_regex.MATCHING_POLICY)
 
 
-def report(path, *, rmm_reference=None, allow_legacy=False):
-    cfg = load(path, rmm_reference=rmm_reference, allow_legacy=allow_legacy)
+def report(path, *, allow_legacy=False):
+    cfg = load(path, allow_legacy=allow_legacy)
     return dict(database=str(Path(path).resolve()),identity_count=0,record_count=len(cfg["rules"]),
                 regex_rule_count=len(cfg["rules"]),notes_count=sum(bool(r.get("Notes", r.get("notes", r.get("description")))) for r in cfg["records"]),
                 metadata=cfg["metadata"],sha256=cfg["database_sha256"],regex_only=True,

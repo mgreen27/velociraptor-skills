@@ -13,7 +13,6 @@ from pathlib import Path
 from vraptor.agent import cli as agent_cli
 from vraptor.analyze import limits as analysis_limits
 from vraptor.agent.config import ANALYST_AGENT_ENABLED_ENV
-from vraptor.agent.config import ResolvedAgentExecution
 from vraptor.agent.config import resolve_agent_execution
 from vraptor.agent.factory import create_agent_runner
 from vraptor.agent.runtime import AgentRequest
@@ -42,16 +41,6 @@ def resolve_output_file(value: str, *, workdir: Path) -> Path:
             f"Analyst output must remain under the work directory {workdir}: {resolved}"
         ) from exc
     return resolved
-
-
-def resolved_execution(
-    _args: argparse.Namespace,
-    *,
-    allow_missing_credentials: bool = False,
-) -> ResolvedAgentExecution:
-    return resolve_agent_execution(
-        allow_missing_credentials=allow_missing_credentials,
-    )
 
 
 def build_prompt(
@@ -126,8 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
 async def async_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        execution = resolved_execution(
-            args,
+        execution = resolve_agent_execution(
             allow_missing_credentials=bool(args.dry_run),
         )
     except RuntimeError as exc:

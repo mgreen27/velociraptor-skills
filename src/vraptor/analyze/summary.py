@@ -82,8 +82,8 @@ def safe_artifact_name(value: str) -> str:
     return f"{readable}--{digest}"
 
 
-def artifact_report_path(artifact: str) -> Path:
-    return Path("artifact-analysis") / f"{safe_artifact_name(artifact)}.md"
+def artifact_report_file(root: Path, artifact: str) -> Path:
+    return root / f"{safe_artifact_name(artifact)}.md"
 
 
 def _canonical(value: Any) -> str:

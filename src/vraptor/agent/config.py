@@ -534,12 +534,6 @@ _FIELD_ENVIRONMENTS: Mapping[str, str] = MappingProxyType(
         "read_timeout_seconds": "AI_SKILLS_ANALYST_AGENT_READ_TIMEOUT_SECONDS",
     }
 )
-AGENT_CONFIGURATION_ENVIRONMENT_VARIABLES = tuple(
-    sorted(
-        set(_FIELD_ENVIRONMENTS.values())
-        | {"AI_SKILLS_ANALYST_AGENT_HARNESS", "AI_SKILLS_ANALYST_AGENT_CLAUDE_CONFIG"}
-    )
-)
 
 _APPLICATION_DEFAULTS: Mapping[str, Any] = MappingProxyType(
     {

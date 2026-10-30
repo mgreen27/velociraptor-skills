@@ -151,13 +151,6 @@ def normalize_target_os(value: str | None) -> str:
     return target if target in TARGET_CHOICES else ""
 
 
-def target_namespace(value: str | None) -> str:
-    target = str(value or "").strip().lower()
-    if target == UNSCOPED_TARGET_NAMESPACE:
-        return UNSCOPED_TARGET_NAMESPACE
-    return normalize_target_os(target) or UNSCOPED_TARGET_NAMESPACE
-
-
 def normalize_case_root(path_value: str | None) -> Path:
     if path_value:
         return Path(path_value).expanduser().resolve()
@@ -179,11 +172,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--download-manifest", help="Optional path to downloads/velociraptor-hunting-download.json.")
     parser.add_argument("--investigation-id", help="Case folder name when resolving --hunt-id.")
     add_case_root_arg(parser)
-    parser.add_argument(
-        "--target",
-        choices=TARGET_NAMESPACES,
-        help="Optional target namespace when resolving --hunt-id. Use all for unscoped or label-scoped hunts.",
-    )
+    parser.add_argument("--target", choices=TARGET_NAMESPACES, help=argparse.SUPPRESS)
     parser.add_argument(
         "--artifact",
         action="append",
@@ -236,7 +225,7 @@ def artifact_matches_selector(entry: dict[str, Any], selectors: list[str]) -> bo
     return any(selector in values for selector in selectors)
 
 
-def find_saved_state_by_hunt_id(case_root: Path, investigation_id: str, hunt_id: str, target: str | None = None) -> Path | None:
+def find_saved_state_by_hunt_id(case_root: Path, investigation_id: str, hunt_id: str) -> Path | None:
     state_path = case_root / investigation_id / "hunts" / hunt_id / "state.json"
     return state_path if state_path.exists() else None
 
@@ -248,7 +237,7 @@ def resolve_state_path(args: argparse.Namespace, case_root: Path) -> Path | None
             raise RuntimeError(f"State file {path} was not found.")
         return path
     if args.hunt_id:
-        state_path = find_saved_state_by_hunt_id(case_root, str(args.investigation_id), str(args.hunt_id), args.target)
+        state_path = find_saved_state_by_hunt_id(case_root, str(args.investigation_id), str(args.hunt_id))
         if state_path is not None:
             return state_path
         raise RuntimeError(

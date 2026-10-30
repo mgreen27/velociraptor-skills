@@ -194,9 +194,9 @@ manual review-memory publication apply only when those operations are needed.
    expire by age. Reuse it; regenerate through engagement setup after a connection
    or readiness failure, then resume the existing hunt.
 2. Select the smallest artifact and parameter set that answers the question.
-3. Run `check`, then `ensure` or the public `run` wrapper. Both paths discover
-   candidates server-wide before mutation; grouped runs preflight every artifact
-   before creating the first hunt.
+3. Run `hunt native check`, then `hunt native ensure` or the public `hunt run`
+   wrapper. Both paths discover candidates server-wide before mutation; grouped
+   runs preflight every artifact before creating the first hunt.
 4. Inspect the candidate classification/rank, source artifact set and parameters,
    human summary, run-identity hash, reuse decision, force decision, and mismatch rationale.
 5. Reuse terminal-success or in-flight/paused exact current-case matches. If only
@@ -279,8 +279,8 @@ manual review-memory publication apply only when those operations are needed.
 15. Send every material finding through the bounded CTI enrichment decision,
     merge the returned context into that finding, and record `complete`,
     `partial`, or `not_applicable` before final publication.
-16. Use `snapshot`, `export-results`, or `download-results` only when durable
-    evidence is required.
+16. Use `hunt snapshot`, `hunt native export-results`, or
+    `hunt native download-results` only when durable evidence is required.
 
 Use the shared `analyst-agent` only as a separate read-only semantic-review lane over bounded evidence. Hunt creation, retries, stops, and analysis checkpoint updates stay with the hunt workflow.
 

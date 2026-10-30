@@ -48,11 +48,11 @@ def test_run_identity_rejects_extra_artifacts_and_changed_scope():
         specs=[{"artifact": "Artifact.Test", "env": {}}],
     )
 
-    assert not run_identity.identities_match(
+    assert run_identity.identity_mismatches(
         expected["identity"],
         extra_artifact["identity"],
     )
-    assert not run_identity.identities_match(
+    assert run_identity.identity_mismatches(
         expected["identity"],
         changed_scope["identity"],
     )

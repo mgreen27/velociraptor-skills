@@ -272,24 +272,18 @@ def unique_dicts(values: Iterable[dict[str, Any]], *, key: str) -> list[dict[str
     return output
 
 
-def analysis_paths(
-    hunt_root: Path,
-    *,
-    memory_filename: str = "analysis-hunt.md",
-) -> dict[str, Path]:
+def analysis_paths(hunt_root: Path) -> dict[str, Path]:
     root = hunt_root / "analysis"
     return {
         "root": root,
         "state": root / flow_analysis_coordinator.STATE_FILENAME,
         "filters": root / "filters.json",
-        "analysis_memory": hunt_root / memory_filename,
+        "analysis_memory": hunt_root / "analysis-hunt.md",
         "review_items_manifest": root / REVIEW_ITEMS_MANIFEST_FILENAME,
-        "summary": hunt_root / memory_filename,
         "autoruns_potential_golden": (
             root / AUTORUNS_POTENTIAL_GOLDEN_FILENAME
         ),
         "autoruns_review": root / "autoruns_review.csv",
-        "autoruns_ai_review": root / "autoruns_ai_review",
     }
 
 
@@ -1125,23 +1119,6 @@ def count_vql(
         f"FROM {source_vql(source)}"
         f"{clause}\n"
         "GROUP BY TRUE"
-    )
-
-
-def autoruns_accounting_vql(
-    where: str, *, source: review_source.ReviewSource | None = None,
-) -> str:
-    """Independent accounting baseline for synthetic parity tests/benchmarks."""
-    return (
-        source_query_preamble(source)
-        + autoruns_golden_query_preamble(where)
-        + "LET AutorunsAccountingRows = SELECT *, "
-        + f"if(condition={where or 'TRUE'}, then=1, else=0) AS Residual\n"
-        + f"FROM {source_vql(source)}\n"
-        + "SELECT count() AS SourceRows, sum(item=Residual) AS ResidualRows, "
-        + "sum(item=if(condition=Residual AND (`Image Path` OR `Launch String`), "
-        + "then=1, else=0)) AS PopulatedRows\n"
-        + "FROM AutorunsAccountingRows GROUP BY TRUE"
     )
 
 
@@ -7531,12 +7508,7 @@ def write_outputs(
     *,
     reusable_filters: list[dict[str, Any]],
     use_case: str = "",
-    ai_review_enabled: bool = False,
-    max_review_tokens: int = (
-        analysis_limits.DEFAULT_MAXIMUM_EVIDENCE_TOKENS_PER_ITEM
-    ),
-    token_encoding: str | None = None,
-) -> list[dict[str, Any]]:
+) -> None:
     paths["root"].mkdir(parents=True, exist_ok=True)
     selected_output_paths = analysis_output_paths(
         paths,
@@ -7571,7 +7543,6 @@ def write_outputs(
     # Focused review queues use the canonical metadata-only review-items.json
     # manifest; live analysis does not create editable queue CSVs or review dirs.
     persisted_state = copy.deepcopy(state)
-    review_files: list[dict[str, Any]] = []
     write_canonical_specialized_state(paths["state"], persisted_state)
     persisted_output_state = output_state_for_use_case(
         persisted_state,
@@ -7613,7 +7584,6 @@ def write_outputs(
         )
     else:
         selected_output_paths["filters"].unlink(missing_ok=True)
-    return review_files
 
 
 def write_suspicious_use_case_outputs(
@@ -8260,14 +8230,11 @@ def analyze_live_hunt(
         state.pop("result_role", None)
     state["updated_at"] = now_utc()
     publish_progress("publishing", force=True)
-    review_files = write_outputs(
+    write_outputs(
         paths,
         state,
         reusable_filters=reusable_filters,
         use_case=use_case,
-        ai_review_enabled=autoruns_ai_review_enabled,
-        max_review_tokens=max_review_tokens,
-        token_encoding=token_encoding,
     )
     suspicious_outputs = write_suspicious_use_case_outputs(
         paths,
@@ -8585,7 +8552,7 @@ def analyze_live_hunt(
             include_review_rows=include_review_rows,
         ),
         "review_items_file": review_items_manifest,
-        "review_files": review_files,
+        "review_files": [],
         "state_file": str(paths["state"]),
         "filters_file": (
             str(selected_output_paths["filters"])

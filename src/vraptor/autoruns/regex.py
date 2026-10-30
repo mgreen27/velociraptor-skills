@@ -39,8 +39,7 @@ def compile_pattern(pattern: str, *, whole_field: bool = True) -> Any:
 class RegexIndex:
     """Compile approved rules once; all fields in a rule must match together."""
 
-    def __init__(self, rows: Iterable[dict[str, str]] = (), *, classifier=None):
-        # Retained keyword for legacy callers; classifiers do not govern approved rules.
+    def __init__(self, rows: Iterable[dict[str, str]] = ()):
         rows = list(rows)
         self.search_rules = [tuple(compile_pattern(row[field], whole_field=False)
             for field in ("Category", "ImagePath", "LaunchString", "Signer"))

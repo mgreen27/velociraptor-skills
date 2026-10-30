@@ -1975,13 +1975,6 @@ def _profile_for_artifact(
     return artifact_profiles.resolve_profile(artifact, profile_map)
 
 
-def _profile_for_source(
-    source: flow_analysis.FlowSource,
-    profiles: dict[str, dict[str, Any]],
-) -> dict[str, Any] | None:
-    return _profile_for_artifact(source.artifact, profiles)
-
-
 def _live_projections(
     artifacts: Iterable[str],
     profiles: Mapping[str, Mapping[str, Any]],
@@ -2076,7 +2069,7 @@ def _project_segment(
     client_identities: Mapping[str, Mapping[str, str]] | None = None,
     flow_ids_by_client: Mapping[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], str]:
-    profile = _profile_for_source(segment.source, profiles)
+    profile = _profile_for_artifact(segment.source.artifact, profiles)
     preferred = artifact_profiles.analysis_fields(profile)
     field_sources = collection_analysis.profile_field_sources(profile)
     projected, fields = collection_analysis.project_rows(
@@ -3242,7 +3235,6 @@ async def _synthesize_transient_results(
     question: str,
     spec: ResolvedAgentExecution,
     limits: Mapping[str, Any],
-    encoding_name: str,
     workdir: Path,
     runtime_dir: Path,
     task_mode: str = "targeted_hunt",
@@ -3896,7 +3888,6 @@ async def _analyze_detectraptor_partition(
                 question=question,
                 spec=spec,
                 limits=limits,
-                encoding_name=encoding_name,
                 workdir=workdir,
                 runtime_dir=workdir / ".api-runtime",
                 shared_execute=shared_execute,
@@ -6146,7 +6137,6 @@ async def _analyze_hunt_flows_locked(
             question=question,
             spec=spec,
             limits=limits,
-            encoding_name=encoding,
             workdir=analysis_root,
             runtime_dir=analysis_root / ".api-runtime",
             task_mode=task_mode,

@@ -2491,7 +2491,6 @@ class HuntAnalysisTest(unittest.TestCase):
             self.assertIn("row_count mismatch", stderr_text)
 
     def test_malformed_state_and_manifest_inputs_fail_closed_with_user_facing_errors(self):
-        module = self.module
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             hunt_dir = root / "IR5300" / "hunts" / "H.5300"

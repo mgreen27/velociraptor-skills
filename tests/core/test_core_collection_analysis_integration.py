@@ -3,10 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
-import hashlib
 import io
 import json
-import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +18,6 @@ from vraptor.agent.runtime import AgentResult
 from vraptor.analyze import limits as analysis_limits
 from vraptor.analyze import host as collection_analysis
 from vraptor.analyze import command as collection_analysis_cli
-from vraptor.analyze import runtime as collection_analysis_runtime
 
 
 TEST_LIMITS = analysis_limits.resolve_analysis_limits({})
