@@ -135,17 +135,26 @@ def test_invalid_or_overlapping_manifest_is_reported(tmp_path, monkeypatch, mani
     assert errors
 
 
+HELD_FINGERPRINT = "sha256:" + "0" * 64 + ";mode:100644"
+
+
 @pytest.mark.parametrize("held,expected", [
-    ("held.txt\treviewed adaptation\n", []),
-    ("held.txt\n", ["invalid held row: held:1"]),
-    ("../held.txt\tescape\n", ["unsafe held path: ../held.txt"]),
-    ("held.txt\ta\nheld.txt\tb\n", ["duplicate held path at line 2"]),
-    ("missing.txt\tgone\n", ["held path is not a file: missing.txt"]),
+    (f"held.txt\t{HELD_FINGERPRINT}\treviewed adaptation\n", []),
+    ("held.txt\treviewed adaptation\n", ["invalid held row: held:1"]),
+    (f"../held.txt\t{HELD_FINGERPRINT}\tescape\n", ["unsafe held path: ../held.txt"]),
+    ("held.txt\tnot-a-fingerprint\treason\n", ["invalid reviewed fingerprint at held line 1"]),
+    (f"held.txt\t{HELD_FINGERPRINT}\ta\nheld.txt\t{HELD_FINGERPRINT}\tb\n", ["duplicate held path at line 2"]),
+    (f"missing.txt\t{HELD_FINGERPRINT}\tgone\n", ["held path is not a file: missing.txt"]),
+    (f"tree/skip.pdf\t{HELD_FINGERPRINT}\texcluded\n", ["held path is not a managed file: tree/skip.pdf"]),
 ])
 def test_held_list_is_validated(tmp_path, monkeypatch, held, expected):
     (tmp_path / "held.txt").write_text("adaptation\n")
+    (tmp_path / "tree").mkdir()
+    (tmp_path / "tree" / "skip.pdf").write_bytes(b"%PDF")
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "HELD", tmp_path / "held")
+    monkeypatch.setattr(validator, "MANIFEST", tmp_path / "manifest")
+    validator.MANIFEST.write_text("up/held.txt\theld.txt\tfile\nup/tree\ttree\ttree\t*.pdf\n")
     validator.HELD.write_text(held)
     errors = []
     validator.check_held(errors)

@@ -34,8 +34,8 @@ restating it.
 - A cached YAML identity, the OS login or an application fallback alone does
   not authorize creation.
 - Honor explicit no-provision, read-only and fetch-only requests.
-- Local dead-disk setup never uses `--provision-api`; it builds its own local
-  server and API YAML.
+- Local dead-disk setup never uses `--provision-api`; it uses the managed local
+  server's own API YAML or the supplied YAML of an existing shared server.
 - Endpoint generation (`--provision-client`) and replacing an existing remote
   API credential (`--regenerate-remote-api`) still need an explicit operator
   request. `--regenerate-remote-api` is never an automatic
@@ -46,7 +46,7 @@ Shared API setup first checks or manually prepares the live account, leaving
 existing accounts unchanged; file helpers separately confirm YAML absence. A
 bootstrap identity is restricted to account provisioning and never becomes the
 operational identity. Connection, permission and copy failures do not authorize
-generation. An existing user instruction to create or replace those
+generation. An existing user instruction to create or replace API or endpoint
 configurations is sufficient authorization; do not request duplicate approval.
 
 ## Collection intent and completion

@@ -79,7 +79,7 @@ For example, to import uncommitted upstream work while retaining public changes:
 Use the same options in both commands, except `--check`/`--apply`, `--diff`, and
 the hash guard. The hash covers repository paths, revision or working-tree
 identity, file bytes and executable modes on both sides, baselines, manifest,
-deny rules, accepted resolutions, and allow flags. If any of these change,
+deny rules, the held list, accepted resolutions, and allow flags. If any of these change,
 preview and review again. Git inventories are loaded once per repository, and
 committed content is fetched in one batch containing only managed blobs.
 Preview exits with `0` for unchanged, converged or held content, `1` for drift or policy
@@ -100,12 +100,15 @@ continue to appear as `reverse-needed`; a later upstream change still conflicts
 and requires review. Unknown paths and deletion conflicts are rejected.
 
 `config/sync-held.tsv` lists managed files that keep a reviewed public
-adaptation, such as the per-repository AI setup defaults. Both directions report
-them as `held` (with `--diff` showing the difference) and never write them, even
-after `--accept-resolved` has moved a baseline, so a later apply in the other
+adaptation, such as the per-repository AI setup defaults, with the upstream
+fingerprint that was reviewed for each. Both directions report them as `held`
+(with `--diff` showing the difference) and never write them, even after
+`--accept-resolved` has moved a baseline, so a later apply in the other
 direction cannot overwrite either side. Held files do not block other imports,
-and `--accept-resolved` refuses them. Port their upstream changes by hand, then
-keep or remove the row.
+and `--accept-resolved` refuses them. When upstream changes a held file, it
+reports `held-changed` with the new upstream fingerprint, preview exits `1` and
+`--apply` refuses: port the change by hand, then record the new fingerprint in
+the row (or remove the row once the files converge).
 
 When upstream adds dependencies, references, or regression tests, review the
 public package metadata and explicit manifest entries as well as managed trees.

@@ -21,8 +21,8 @@ from typing import Iterable
 
 from public_audit import append_audit, finding_metadata
 from sync_policy import (
-    SCHEMA_VERSION, Mapping, PolicyError, load_deny_patterns, load_held, load_manifest, load_state,
-    pair_key, validate_relative_path,
+    SCHEMA_VERSION, Held, Mapping, PolicyError, load_deny_patterns, load_held, load_manifest,
+    load_state, pair_key, validate_relative_path,
 )
 
 
@@ -74,6 +74,7 @@ class Action:
     source: FileValue | None
     target: FileValue | None
     base: str | None
+    upstream: str | None = None
 
 
 def run_git(
@@ -340,18 +341,21 @@ def plan_actions(
     public_reader: Reader,
     state: dict,
     direction: str,
-    held: Iterable[str] = (),
+    held: dict[str, Held] | None = None,
 ) -> list[Action]:
-    held = set(held)
+    held = held or {}
     ai_reader.prepare([(pair.ai_path, mode) for pair, mode, _ in pairs if mode is not None])
     public_reader.prepare([(pair.public_path, mode) for pair, _, mode in pairs if mode is not None])
     actions: list[Action] = []
     for pair, ai_mode, public_mode in pairs:
         ai_value = read_optional(ai_reader, pair.ai_path, ai_mode)
+        upstream_fp = None
         if ai_value is not None:
             data = ai_value.data
+            exported = public_setup_content(pair.ai_path, data)
+            upstream_fp = FileValue(public_layout_content(pair.ai_path, exported), ai_value.mode).fingerprint
             if direction == "from-ai":
-                data = public_setup_content(pair.ai_path, data)
+                data = exported
             ai_value = FileValue(public_layout_content(pair.ai_path, data), ai_value.mode)
         public_value = read_optional(public_reader, pair.public_path, public_mode)
         source = ai_value if direction == "from-ai" else public_value
@@ -385,9 +389,10 @@ def plan_actions(
             else:
                 status = "conflict"
         # A held file keeps its reviewed adaptation: report it, never write it.
+        # An upstream change since the recorded review needs a manual port first.
         if pair.public_path in held and status not in {"unchanged", "converged"}:
-            status = "held"
-        actions.append(Action(status, pair, source, target, base))
+            status = "held" if upstream_fp == held[pair.public_path].reviewed else "held-changed"
+        actions.append(Action(status, pair, source, target, base, upstream_fp))
     return actions
 
 
@@ -433,7 +438,7 @@ def accept_resolutions(actions: list[Action], paths: list[str], direction: str) 
         path = action.pair.public_path if direction == "from-ai" else action.pair.ai_path
         if path in requested:
             requested.remove(path)
-            if action.status == "held":
+            if action.status in {"held", "held-changed"}:
                 raise SyncError(f"held files are ported by hand and never resolved: {path}")
             if action.status != "conflict" or action.source is None or action.target is None:
                 raise SyncError(f"--accept-resolved requires a two-file conflict: {path}")
@@ -494,7 +499,10 @@ def render_report(actions: list[Action], direction: str) -> None:
     visible = [action for action in actions if action.status != "unchanged"]
     for action in visible:
         path = action.pair.public_path if direction == "from-ai" else action.pair.ai_path
-        print(f"{action.status:15} {path}")
+        if action.status == "held-changed":
+            print(f"{action.status:15} {path} (upstream {action.upstream})")
+        else:
+            print(f"{action.status:15} {path}")
     counts: dict[str, int] = {}
     for action in actions:
         counts[action.status] = counts.get(action.status, 0) + 1
@@ -642,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         "mappings": [(mapping.ai_path, mapping.public_path, mapping.kind) for mapping in mappings],
         "deny_patterns": [(label, pattern.pattern, pattern.flags) for label, pattern in patterns],
         "state": state,
-        "held": sorted(held.items()),
+        "held": sorted((path, value.reviewed, value.reason) for path, value in held.items()),
         "accept_resolved": sorted(set(args.accept_resolved)),
         "allow_delete": args.allow_delete,
         "allow_policy_findings": args.allow_policy_findings,
@@ -667,6 +675,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if changed or findings else 0
     if conflicts:
         raise SyncError("refusing to apply: resolve files changed differently on both sides")
+    held_changed = [action.pair.public_path for action in actions if action.status == "held-changed"]
+    if held_changed:
+        raise SyncError(
+            "refusing to apply: upstream changed held files since review; port them by hand and "
+            "update their reviewed fingerprint in config/sync-held.tsv: " + ", ".join(held_changed)
+        )
     if reverse_pending and not args.allow_reverse_pending:
         raise SyncError(
             "refusing to apply: synchronize destination-only changes in the reverse "

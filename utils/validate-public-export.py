@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -36,6 +37,7 @@ MANIFEST_ERRORS = {
 HELD_ERRORS = {
     "row": "invalid held row: {held}:{line}",
     "path": "unsafe held path: {value}",
+    "fingerprint": "invalid reviewed fingerprint at held line {line}",
     "duplicate": "duplicate held path at line {line}",
 }
 STATE_ERRORS = {
@@ -188,7 +190,20 @@ def check_held(errors: list[str]) -> None:
         HELD_ERRORS[problem.reason].format(held=HELD.relative_to(REPO_ROOT), line=problem.line, value=problem.value)
         for problem in problems
     )
-    errors.extend(f"held path is not a file: {path}" for path in held if not (REPO_ROOT / path).is_file())
+    mappings = load_manifest(MANIFEST, []) if MANIFEST.is_file() else []
+    for path in held:
+        if not (REPO_ROOT / path).is_file():
+            errors.append(f"held path is not a file: {path}")
+        elif not any(managed(mapping, path) for mapping in mappings):
+            errors.append(f"held path is not a managed file: {path}")
+
+
+def managed(mapping, path: str) -> bool:
+    """Match synchronization's file pairing, including tree exclude globs."""
+    if mapping.kind == "file":
+        return path == mapping.public_path
+    suffix = path[len(mapping.public_path) + 1:] if path.startswith(mapping.public_path + "/") else ""
+    return bool(suffix) and not any(fnmatch.fnmatchcase(suffix, glob) for glob in mapping.exclude)
 
 
 def check_database(errors: list[str]) -> None:

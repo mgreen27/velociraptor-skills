@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -558,9 +559,14 @@ def initialize_held_pair(tmp_path: Path) -> tuple[Path, Path, Path]:
     return public, ai, script
 
 
-def hold(public: Path, *paths: str) -> None:
-    rows = "".join(f"{path}\treviewed adaptation\n" for path in paths)
-    (public / "config" / "sync-held.tsv").write_text(rows, encoding="utf-8")
+def upstream_fingerprint(ai: Path) -> str:
+    digest = hashlib.sha256((ai / "shared" / "held.txt").read_bytes()).hexdigest()
+    return f"sha256:{digest};mode:100644"
+
+
+def hold(public: Path, ai: Path) -> None:
+    row = f"managed/held.txt\t{upstream_fingerprint(ai)}\treviewed adaptation\n"
+    (public / "config" / "sync-held.tsv").write_text(row, encoding="utf-8")
     commit_all(public, "hold files")
 
 
@@ -570,7 +576,7 @@ def test_held_file_is_reported_and_never_written(tmp_path: Path, direction: str)
     if direction == "from-ai":
         # Without the held row, the conflict would block every other import.
         run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public, expected=2)
-    hold(public, "managed/held.txt")
+    hold(public, ai)
     source = ai if direction == "from-ai" else public
     source_path = "shared/file.txt" if direction == "from-ai" else "managed/file.txt"
     (source / source_path).write_text("version two\n", encoding="utf-8")
@@ -601,7 +607,7 @@ def test_held_file_survives_reverse_apply_after_resolution(tmp_path: Path, direc
     second = ["python3", str(script), reverse, "--target" if reverse == "to-ai" else "--source", str(ai)]
     # The moved baseline makes the other direction a plain update ...
     assert "update" in run([*second, "--check"], public, expected=1).stdout
-    hold(public, "managed/held.txt")
+    hold(public, ai)
     # ... which the held row turns into a report.
     run([*second, "--apply"], public)
     assert (public / "managed/held.txt").read_text() == "public default\n"
@@ -610,7 +616,7 @@ def test_held_file_survives_reverse_apply_after_resolution(tmp_path: Path, direc
 
 def test_held_file_cannot_be_accept_resolved(tmp_path: Path) -> None:
     public, ai, script = initialize_held_pair(tmp_path)
-    hold(public, "managed/held.txt")
+    hold(public, ai)
     result = run(
         ["python3", str(script), "from-ai", "--source", str(ai), "--apply", "--accept-resolved", "managed/held.txt"],
         public,
@@ -619,12 +625,37 @@ def test_held_file_cannot_be_accept_resolved(tmp_path: Path) -> None:
     assert "held files are ported by hand" in result.stderr
 
 
-@pytest.mark.parametrize("row", ["managed/missing.txt\tgone\n", "managed/held.txt\n", "../held.txt\tescape\n"])
+FINGERPRINT = "sha256:" + "0" * 64 + ";mode:100644"
+
+
+@pytest.mark.parametrize("row", [
+    f"managed/missing.txt\t{FINGERPRINT}\tgone\n",
+    "managed/held.txt\treason\n",
+    f"../held.txt\t{FINGERPRINT}\tescape\n",
+    "managed/held.txt\tnot-a-fingerprint\treason\n",
+])
 def test_invalid_held_rows_are_rejected(tmp_path: Path, row: str) -> None:
     public, ai, script = initialize_held_pair(tmp_path)
     (public / "config" / "sync-held.tsv").write_text(row, encoding="utf-8")
     commit_all(public, "bad held row")
     run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public, expected=2)
+    assert (public / "managed/held.txt").read_text() == "public default\n"
+
+
+def test_upstream_change_to_held_file_needs_review(tmp_path: Path) -> None:
+    public, ai, script = initialize_held_pair(tmp_path)
+    hold(public, ai)
+    (ai / "shared" / "held.txt").write_text("ai fix\n", encoding="utf-8")
+    commit_all(ai, "upstream fix")
+    args = ["python3", str(script), "from-ai", "--source", str(ai)]
+    preview = run([*args, "--check"], public, expected=1)
+    assert f"held-changed    managed/held.txt (upstream {upstream_fingerprint(ai)})" in preview.stdout
+    result = run([*args, "--apply"], public, expected=2)
+    assert "port them by hand" in result.stderr
+    assert (public / "managed/held.txt").read_text() == "public default\n"
+    # Recording the reviewed upstream fingerprint returns the file to held.
+    hold(public, ai)
+    run([*args, "--apply"], public)
     assert (public / "managed/held.txt").read_text() == "public default\n"
 
 

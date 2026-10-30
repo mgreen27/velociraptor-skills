@@ -16,7 +16,8 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
 - Preserve dirty work and never overwrite a managed file that changed on both
   sides. Files in `config/sync-held.tsv` (`.codex/agents/hunt-agent.toml`, the
   per-repository AI setup defaults) keep reviewed public adaptations: the sync
-  reports them as `held` and never writes them, so port upstream changes by hand.
+  reports them as `held` and never writes them; an upstream change makes them
+  `held-changed` until it is ported by hand and its fingerprint recorded.
 - The sync rewrites upstream `packages/vraptor/...` paths to this layout; a
   file that differs only by those paths is converged.
 - Repository-owned, not synchronized: this file, `CLAUDE.md`, `README.md`,
@@ -33,7 +34,7 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
   the skill from saved selections). `tests/core/`: portable tests (no server or
   network).
 - `utils/`: install, link, sync and validation scripts. `config/`: examples,
-  sync manifest and public deny patterns.
+  sync manifest, held files (`sync-held.tsv`) and public deny patterns.
 
 ## Commands
 
@@ -56,4 +57,5 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
 - Treat Velociraptor as the evidence authority. Preserve exact flow, hunt,
   client, artifact, scope, and coverage provenance.
 - Require explicit authorization before remote collection, hunt creation,
-  retries, cancellation, API-user generation, or other server mutation.
+  retries, cancellation, or other server mutation. API-user provisioning follows
+  `docs/reference/velociraptor-operation-authorization.md#api-user-provisioning`.
