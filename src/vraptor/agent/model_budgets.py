@@ -14,6 +14,7 @@ CATALOG_PATH = resource_root() / "model-catalog.toml"
 
 MIN_INPUT_TOKENS = 100_000
 MIN_OUTPUT_TOKENS = 32_000
+CLAUDE_CODE_DISABLE_1M = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,8 @@ class ModelBudget:
     output_budget_tokens: int | None = None
     input_budget_tokens: int | None = None
     alias_reference_model: str | None = None
-    claude_code_limited: bool = False
+    # "needs_1m_variant" or "1m_disabled" when the Claude Code window applies.
+    claude_code_limit: str = ""
 
     @property
     def default_output_tokens(self) -> int:
@@ -120,22 +122,42 @@ def effort_summary(provider: str) -> list[str]:
     ]
 
 
-def model_budget(provider: str, model: str, protocol: str = "") -> ModelBudget | None:
+def claude_code_1m_disabled(value: object) -> bool:
+    # Claude Code reads CLAUDE_CODE_DISABLE_1M_CONTEXT as 1, true, yes or on.
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def claude_code_window() -> dict:
+    """Claude Code limits for any model while 1M context is disabled."""
+    return dict(_provider("anthropic")["claude_code_200k"])
+
+
+def model_budget(
+    provider: str, model: str, protocol: str = "", *, claude_code_1m: bool = True
+) -> ModelBudget | None:
     # Only exact catalog IDs and the listed aliases have offline references.
     # Never infer a model from an arbitrary deployment name or future snapshot.
     entry = _provider(provider)
     alias_target = _alias_target(entry, model)
     selected = alias_target or model
-    claude_code = protocol == "claude_agent_sdk"
-    extended = claude_code and selected.lower().endswith("[1m]")
+    window = entry.get("claude_code_200k", {}) if protocol == "claude_agent_sdk" else {}
+    extended = bool(window) and selected.lower().endswith("[1m]")
     if extended:
         # Claude Code selects the 1M window of claude-opus-4-6[1m] and similar.
         selected = selected[: -len("[1m]")]
     for item in entry.get("models", ()):
         if selected != item["id"] and selected not in item.get("snapshots", ()):
             continue
-        limited = claude_code and not extended and "claude_code" in item
-        limits = {**item, **item["claude_code"]} if limited else item
+        limit = (
+            ""
+            if not window or item["context_tokens"] <= window["context_tokens"]
+            else "1m_disabled"
+            if not claude_code_1m
+            else "needs_1m_variant"
+            if item.get("claude_code_1m_variant") and not extended
+            else ""
+        )
+        limits = _windowed(item, window) if limit else item
         return ModelBudget(
             limits["context_tokens"],
             limits["standard_price_input_ceiling"],
@@ -146,16 +168,35 @@ def model_budget(provider: str, model: str, protocol: str = "") -> ModelBudget |
             output_budget_tokens=limits.get("output_budget_tokens"),
             input_budget_tokens=limits.get("input_budget_tokens"),
             alias_reference_model=alias_target,
-            claude_code_limited=limited,
+            claude_code_limit=limit,
         )
     return None
 
 
+def _windowed(item: dict, window: dict) -> dict:
+    return {
+        **item,
+        **window,
+        "standard_price_input_ceiling": min(
+            item["standard_price_input_ceiling"], window["standard_price_input_ceiling"]
+        ),
+        # Output shares the window with at least the minimum input.
+        "max_output_tokens": min(
+            item["max_output_tokens"], window["context_tokens"] - MIN_INPUT_TOKENS
+        ),
+    }
+
+
 def captured_envelopes(provider: str) -> set[tuple[int, int]]:
     """Context/output pairs that setup saves for listed models on any route."""
+    entry = _provider(provider)
+    window = entry.get("claude_code_200k")
     pairs = set()
-    for item in _provider(provider).get("models", ()):
-        for limits in (item, {**item, **item.get("claude_code", {})}):
+    for item in entry.get("models", ()):
+        variants = [item]
+        if window and item["context_tokens"] > window["context_tokens"]:
+            variants.append(_windowed(item, window))
+        for limits in variants:
             context = limits["context_tokens"]
             pairs.add(
                 (context, min(context - MIN_INPUT_TOKENS, limits["max_output_tokens"]))

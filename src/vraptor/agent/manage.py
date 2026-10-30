@@ -18,9 +18,12 @@ from typing import Any
 
 from vraptor.agent.config import REPO_ROOT, resolve_agent_execution
 from vraptor.agent.model_budgets import (
+    CLAUDE_CODE_DISABLE_1M,
     MIN_INPUT_TOKENS,
     MIN_OUTPUT_TOKENS,
     captured_envelopes,
+    claude_code_1m_disabled,
+    claude_code_window,
     effort_label,
     effort_levels,
     effort_summary,
@@ -31,7 +34,9 @@ from vraptor.agent.model_budgets import (
 from vraptor.agent.registry import PROVIDERS
 from vraptor.agent.sources import (
     NAME,
+    claude_managed_env,
     claude_settings_path,
+    setting,
     expand_path,
     normalize_document,
     read_config,
@@ -850,6 +855,18 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     budget_model = model
     budget_provider = provider
     budget_protocol = "claude_agent_sdk" if runs_sdk else ""
+    # Read as the Claude Code subprocess sees it; runtime applies the same rule.
+    managed_1m = claude_managed_env(CLAUDE_CODE_DISABLE_1M)
+    disable_1m = (
+        managed_1m[0]
+        if managed_1m
+        else setting(repository_environment(REPO_ROOT), CLAUDE_CODE_DISABLE_1M)
+    )
+    # Scratch resolutions see HOME only; keep the setting for their route.
+    resolve_environment = {
+        "HOME": str(Path.home()),
+        **({CLAUDE_CODE_DISABLE_1M: disable_1m} if disable_1m else {}),
+    }
     if not budget_model and args.from_harness:
         # Use the real resolver for inherited native models (including named
         # Codex profiles), without login, discovery requests, or inference.
@@ -859,13 +876,21 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
             preview = resolve_agent_execution(
                 cli_values={"config_file": str(candidate), "execution_profile": name},
                 repo_root=Path(scratch),
-                process_environment={"HOME": str(Path.home())},
+                process_environment=resolve_environment,
                 allow_missing_credentials=True,
             )
             budget_model = preview.route.model
             budget_provider = preview.route.provider
             budget_protocol = preview.route.protocol
-    reference = model_budget(budget_provider, budget_model or "", budget_protocol)
+    claude_code_1m = budget_protocol != "claude_agent_sdk" or not (
+        claude_code_1m_disabled(disable_1m)
+    )
+    reference = model_budget(
+        budget_provider,
+        budget_model or "",
+        budget_protocol,
+        claude_code_1m=claude_code_1m,
+    )
     reference_report = {
         "model": budget_model,
         "known": reference is not None,
@@ -884,10 +909,16 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                     "  Alias resolution is not verified; for remapped aliases select the exact model ID or configure smaller deployment caps.",
                     file=sys.stderr,
                 )
-            if reference.claude_code_limited:
+            if reference.claude_code_limit == "needs_1m_variant":
                 print(
                     f"  Claude Code runs {budget_model} at {reference.context_tokens:,} tokens;\n"
                     f"  {budget_model}[1m] selects 1M where the plan allows it.",
+                    file=sys.stderr,
+                )
+            elif reference.claude_code_limit == "1m_disabled":
+                print(
+                    f"  {CLAUDE_CODE_DISABLE_1M} is set, so Claude Code runs\n"
+                    f"  {budget_model} at {reference.context_tokens:,} tokens.",
                     file=sys.stderr,
                 )
             print(
@@ -933,12 +964,19 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     configured_context = profile.get(
         "model_context_tokens", defaults.get("model_context_tokens")
     )
+    # Save the model's own limits; runtime holds the route to Claude Code's
+    # window only while 1M context stays disabled.
+    envelope = (
+        model_budget(budget_provider, budget_model or "", budget_protocol)
+        if reference and reference.claude_code_limit == "1m_disabled"
+        else reference
+    )
     context = int(
         configured_context
-        or (reference.context_tokens if reference else MODEL_CONTEXT_TOKENS)
+        or (envelope.context_tokens if envelope else MODEL_CONTEXT_TOKENS)
     )
-    if reference:
-        context = min(context, reference.context_tokens)
+    if envelope:
+        context = min(context, envelope.context_tokens)
         # Capture the real model envelope even when editing an existing profile.
         # Otherwise the resolver's generic 400K fallback silently restricts it.
         profile["model_context_tokens"] = context
@@ -952,13 +990,20 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     output_maximum = min(
         context - MIN_INPUT_TOKENS,
         int(output_cap) if output_cap else context - MIN_INPUT_TOKENS,
-        reference.max_output_tokens if reference else context - MIN_INPUT_TOKENS,
+        envelope.max_output_tokens if envelope else context - MIN_INPUT_TOKENS,
     )
-    if reference:
+    if envelope:
         profile["model_max_output_tokens"] = output_maximum
+    windowed = not claude_code_1m and context > claude_code_window()["context_tokens"]
+    if windowed:
+        # Budgets for every model, listed or not, fit the 200K window.
+        context = claude_code_window()["context_tokens"]
+        output_maximum = min(output_maximum, context - MIN_INPUT_TOKENS)
     if os.isatty(0):
         source = (
-            "configured model/deployment limit"
+            f"{CLAUDE_CODE_DISABLE_1M} is set"
+            if windowed
+            else "configured model/deployment limit"
             if configured_context
             else "selected model"
             if reference
@@ -973,20 +1018,29 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     def saved_budget(value, maximum):
         return maximum if value == "max" else int(value)
 
+    # An unlisted model in Claude Code's 200K window takes the window's budgets.
+    window_budgets = claude_code_window() if windowed and not reference else None
     recommended_output = (
         reference.default_output_tokens
         if reference
+        else window_budgets["output_budget_tokens"]
+        if window_budgets
         else 128_000
         if profile_action == "added" and provider in {"openai", "azure_openai"}
         else saved_budget(analysis_defaults["max_output_tokens"], output_maximum)
     )
-    if not reference and configured_context and "max_output_tokens" not in profile:
+    if (
+        not reference
+        and not window_budgets
+        and configured_context
+        and "max_output_tokens" not in profile
+    ):
         recommended_output = min(
             recommended_output,
             int(output_cap) if output_cap else MIN_OUTPUT_TOKENS,
             context - MIN_INPUT_TOKENS,
         )
-    automatic_budgets = args.auto_token_budgets and reference is not None
+    automatic_budgets = args.auto_token_budgets and bool(reference or window_budgets)
     output_default = (
         recommended_output
         if automatic_budgets
@@ -1028,6 +1082,8 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         input_maximum,
         (reference.input_budget_tokens or input_maximum)
         if reference
+        else window_budgets["input_budget_tokens"]
+        if window_budgets
         else input_maximum,
     )
     input_default = (
@@ -1039,7 +1095,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                 saved_analysis_defaults.get(
                     "max_input_tokens",
                     recommended_input
-                    if reference
+                    if reference or window_budgets
                     else analysis_defaults["max_input_tokens"],
                 ),
             ), input_maximum
@@ -1087,7 +1143,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         execution = resolve_agent_execution(
             cli_values={"config_file": str(candidate), "execution_profile": name},
             repo_root=Path(scratch),
-            process_environment={"HOME": str(Path.home())},
+            process_environment=resolve_environment,
             allow_missing_credentials=True,
         )
         execution = replace(

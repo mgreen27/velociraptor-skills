@@ -451,6 +451,76 @@ def test_claude_code_route_uses_its_context_window(tmp_path, model, transport, e
     ) == expected
 
 
+@pytest.mark.parametrize(
+    "transport,expected",
+    [
+        ("claude_agent_sdk", (200000, 120000, 64000)),
+        ("api", (1000000, 872000, 128000)),
+    ],
+)
+def test_disabled_1m_context_budgets_claude_code_at_200k(tmp_path, transport, expected):
+    flags = ("--from-harness", "claude_code", "--transport", transport)
+    model = ("--model", "claude-opus-5-5")
+    with mock.patch.dict("os.environ", {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}):
+        report = manage.setup(setup_args(tmp_path, *flags, *model))
+    effective = report["analysis_limits"]["effective"]
+    assert (
+        effective["model_context_tokens"],
+        effective["maximum_input_tokens"],
+        effective["maximum_output_tokens"],
+    ) == expected
+    # Clearing the setting restores the model's own limits on rerun.
+    report = manage.setup(setup_args(tmp_path, *flags))
+    effective = report["analysis_limits"]["effective"]
+    assert effective["model_context_tokens"] == 1000000
+    assert effective["maximum_input_tokens"] == 872000
+
+
+@pytest.mark.parametrize(
+    "model,extra,expected",
+    [
+        # The profile keeps the model's own limits; only budgets fit 200K.
+        ("claude-opus-5-5", (), (1000000, 200000, 120000, 64000)),
+        # Unlisted models are held to the same window.
+        ("custom-claude", (), (None, 200000, 120000, 64000)),
+        # An explicit smaller deployment cap is kept.
+        ("claude-opus-5-5", ("--model-context-tokens", "150000"), (150000, 150000, 100000, 50000)),
+    ],
+)
+def test_managed_disabled_1m_context_budgets_claude_code_at_200k(
+    tmp_path, monkeypatch, model, extra, expected
+):
+    directory = tmp_path / "managed"
+    directory.mkdir()
+    (directory / "managed-settings.json").write_text(
+        json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "true"}})
+    )
+    monkeypatch.setattr(sources, "DEFAULT_CLAUDE_MANAGED_SETTINGS_DIR", directory)
+    flags = ("--from-harness", "claude_code", "--transport", "claude_agent_sdk")
+    report = manage.setup(setup_args(tmp_path, *flags, "--model", model, *extra))
+    profile = sources.read_config(tmp_path / "analyst.toml")["profiles"]["claude_code"]
+    effective = report["analysis_limits"]["effective"]
+    assert (
+        profile.get("model_context_tokens"),
+        effective["model_context_tokens"],
+        effective["maximum_input_tokens"],
+        effective["maximum_output_tokens"],
+    ) == expected
+
+
+def test_disabled_1m_context_rerun_keeps_window_budgets_for_unlisted_model(tmp_path):
+    flags = ("--from-harness", "claude_code", "--transport", "claude_agent_sdk")
+    with mock.patch.dict("os.environ", {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}):
+        for _ in range(2):
+            report = manage.setup(setup_args(tmp_path, *flags, "--model", "custom-claude"))
+            effective = report["analysis_limits"]["effective"]
+            assert (
+                effective["model_context_tokens"],
+                effective["maximum_input_tokens"],
+                effective["maximum_output_tokens"],
+            ) == (200000, 120000, 64000)
+
+
 def test_claude_code_import_on_api_transport_checks_effort_ladder(tmp_path):
     with pytest.raises(RuntimeError, match="supports reasoning effort low, medium"):
         manage.setup(

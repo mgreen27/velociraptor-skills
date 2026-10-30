@@ -10,6 +10,7 @@ from vraptor.agent.config import resolve_agent_execution
 from vraptor.agent.model_budgets import (
     MIN_INPUT_TOKENS,
     MIN_OUTPUT_TOKENS,
+    claude_code_1m_disabled,
     effort_levels,
     load_model_catalog,
     model_aliases,
@@ -217,13 +218,60 @@ def test_model_catalog_entries_are_consistent(provider):
         assert model_budget(provider, alias).alias_reference_model == target
 
 
-def test_claude_code_route_limits_are_consistent():
+@pytest.mark.parametrize("enabled", [True, False])
+def test_claude_code_route_limits_are_consistent(enabled):
     for item in load_model_catalog()["providers"]["anthropic"]["models"]:
-        budget = model_budget("anthropic", item["id"], "claude_agent_sdk")
+        budget = model_budget(
+            "anthropic", item["id"], "claude_agent_sdk", claude_code_1m=enabled
+        )
         assert budget.max_input_tokens >= MIN_INPUT_TOKENS
         assert MIN_OUTPUT_TOKENS <= budget.default_output_tokens
         assert budget.default_output_tokens <= budget.max_output_tokens
-        assert budget.claude_code_limited == ("claude_code" in item)
+        larger = item["context_tokens"] > 200000
+        assert budget.claude_code_limit == (
+            ("needs_1m_variant" if item.get("claude_code_1m_variant") else "")
+            if enabled
+            else "1m_disabled" if larger else ""
+        )
+        assert budget.context_tokens == (
+            200000 if budget.claude_code_limit else item["context_tokens"]
+        )
+
+
+@pytest.mark.parametrize(
+    "value,disabled",
+    [
+        ("1", True), ("true", True), ("TRUE", True), (" yes ", True), ("on", True),
+        ("0", False), ("false", False), ("", False), ("off", False), ("2", False),
+    ],
+)
+def test_claude_code_1m_disable_values_match_claude_code(value, disabled):
+    # Checked against the bundled Claude Code CLI: only these drop context-1m.
+    assert claude_code_1m_disabled(value) is disabled
+
+
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        ("claude-opus-5-5", (200000, 120000, 64000)),
+        ("opus", (200000, 120000, 64000)),
+        ("claude-opus-4-6[1m]", (200000, 120000, 64000)),
+        ("claude-haiku-5-5", (200000, 100000, 64000)),
+        ("claude-haiku-4-5", (200000, 120000, 64000)),
+    ],
+)
+def test_disabled_1m_context_holds_claude_code_route_to_200k(model, expected):
+    budget = model_budget("anthropic", model, "claude_agent_sdk", claude_code_1m=False)
+    assert (
+        budget.context_tokens,
+        budget.default_input_tokens,
+        budget.default_output_tokens,
+    ) == expected
+    # Output shares the window with the minimum input.
+    assert budget.max_output_tokens == (64000 if "4-5" in model else 100000)
+    # The API route ignores the Claude Code setting.
+    api = model_budget("anthropic", model.replace("[1m]", ""), claude_code_1m=False)
+    assert api.claude_code_limit == ""
 
 
 @pytest.mark.parametrize("model", ["claude-opus-4-6", "claude-sonnet-4-6"])

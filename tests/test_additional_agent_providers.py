@@ -367,7 +367,10 @@ def test_claude_sdk_rejects_incomplete_success_result(stop, classification):
         (None, "stop_sequence", "incomplete_response"),
     ],
 )
-def test_claude_sdk_classifies_cli_error_results(api_stop, result_stop, classification):
+@pytest.mark.parametrize("result", ["partial", "Prompt is too long: 210000 tokens > 200000 maximum"])
+def test_claude_sdk_classifies_cli_error_results(
+    api_stop, result_stop, classification, result
+):
     # Claude Code reports these stops as is_error results; the streamed
     # message_delta carries the API stop reason.
     pytest.importorskip("claude_agent_sdk")
@@ -392,7 +395,7 @@ def test_claude_sdk_classifies_cli_error_results(api_stop, result_stop, classifi
             is_error=True,
             num_turns=1,
             session_id="test-session",
-            result="partial",
+            result=result,
             stop_reason=result_stop,
         )
 
@@ -406,11 +409,53 @@ def test_claude_sdk_classifies_cli_error_results(api_stop, result_stop, classifi
         pytest.raises(AgentProviderException) as raised,
     ):
         asyncio.run(run())
+    if result.startswith("Prompt is too long") and result_stop != "refusal":
+        # Claude Code's own text when the prompt exceeds its window.
+        classification = "context_window_exceeded"
+        expected = "model_context_window_exceeded"
+    else:
+        expected = result_stop if classification == "incomplete_response" else (
+            api_stop or result_stop
+        )
     assert raised.value.error.classification == classification
-    expected = result_stop if classification == "incomplete_response" else (
-        api_stop or result_stop
-    )
     assert raised.value.error.finish_reason == expected
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_claude_sdk_passes_disabled_1m_context_to_claude_code(enabled):
+    pytest.importorskip("claude_agent_sdk")
+    from claude_agent_sdk import ResultMessage
+
+    seen = {}
+
+    async def query(**kwargs):
+        seen.update(kwargs["options"].env)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            result="READY",
+        )
+
+    selected = execution("anthropic", "claude_agent_sdk")
+    selected = replace(
+        selected, route=replace(selected.route, claude_code_1m_context=enabled)
+    )
+
+    async def run():
+        return await ClaudeAgentSDKAdapter(selected, TimeoutPolicy()).execute(
+            request()
+        )
+
+    with mock.patch("claude_agent_sdk.query", query):
+        assert asyncio.run(run()).output == "READY"
+    # Settings from vraptor .env files must reach Claude Code as budgeted.
+    assert ("CLAUDE_CODE_DISABLE_1M_CONTEXT" in seen) is not enabled
+    if not enabled:
+        assert seen["CLAUDE_CODE_DISABLE_1M_CONTEXT"] == "1"
 
 
 def test_anthropic_unexpected_action_preserves_usage():

@@ -258,7 +258,7 @@ references checked **2026-10-30** cover the exact IDs in the model catalog:
 | Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and the listed earlier 1M models | 1000000 context | 128000 | 128000 | 872000 |
 | Claude Haiku 5.5 `claude-haiku-5-5` | 100000 | 128000 | 128000 | 100000 |
 | Claude Haiku 4.5 `claude-haiku-4-5`, `claude-haiku-4-5-20251001` | 200000 context | 64000 | 64000 | 120000 |
-| Claude Opus/Sonnet 4.6 on the Claude Code route, without `[1m]` | 200000 context | 128000 | 64000 | 120000 |
+| Claude Opus/Sonnet 4.6 on the Claude Code route without `[1m]`; any larger Claude model there while `CLAUDE_CODE_DISABLE_1M_CONTEXT` is set | 200000 context | 100000 | 64000 | 120000 (Haiku 5.5: 100000) |
 
 [OpenAI model specifications](https://developers.openai.com/api/docs/models/gpt-6-sol)
 describe the surcharge above 272K input.
@@ -273,9 +273,33 @@ same per-token rate. Haiku 4.5 defaults to 64000 output and 120000 input, below 
 `claude-opus-4-6` and `claude-sonnet-4-6` at 200K, so Claude Code profiles use the
 same 64000 / 120000 defaults for them; `claude-opus-4-6[1m]` or
 `claude-sonnet-4-6[1m]` selects the 1M window where the plan allows it
-([model configuration](https://code.claude.com/docs/en/model-config)). Budgets are local
-o200k estimates: Claude counts the same text as roughly 1.15–1.35 times as many
-tokens, more for code-like evidence such as hashes and paths, so a full budget can
+([model configuration](https://code.claude.com/docs/en/model-config)).
+`CLAUDE_CODE_DISABLE_1M_CONTEXT` set to `1`, `true`, `yes` or `on` (as Claude Code
+reads it; `0`, `false` or empty keep 1M) makes Claude Code run every model at 200K,
+`[1m]` variants included. Vraptor reads it from Claude Code's managed settings
+files (`/etc/claude-code/managed-settings.json`, then non-hidden
+`managed-settings.d/*.json` in name order; `/Library/Application Support/ClaudeCode`
+on macOS), which win, then from the process environment and its `.env` layers, and
+passes it to Claude Code on analyst runs. It does not read server-managed settings,
+MDM or registry policies, or `~/.claude.json`, which can hold account data: a value
+set only there reaches Claude Code but not the budgets, and the resulting
+`Prompt is too long` error is reported as `model_context_window_exceeded`. While
+the variable is set on the Claude Code route:
+
+- Setup keeps the model's own limits in the profile and budgets the 200000 window
+  with 64000 output and 120000 input (Haiku 5.5: 100000), unlisted models included.
+  An explicit smaller `--model-context-tokens` is kept.
+- Runtime caps `model_context_tokens` at 200000 and `model_max_output_tokens` at
+  100000, on every analysis path.
+- Saved profile budgets that exceed 200000 together are lowered to at most 120000
+  input / 64000 output; a saved `max` fills what its partner leaves.
+- CLI budgets above the window are rejected; environment budgets are narrowed to
+  fit, as for any model.
+
+The API route ignores the variable. Rerun setup after changing it.
+
+Budgets are local o200k estimates: Claude counts the same text as roughly
+1.15–1.35 times as many tokens, more for code-like evidence such as hashes and paths, so a full budget can
 exceed a Claude context window or Haiku 5.5's 100000 price tier. The JSON reference reports `default_input_tokens`
 separately from `max_input_tokens`. Setup defaults to automatic budgets for known models, including
 reruns; use `--no-auto-token-budgets` to retain saved values within the allowed

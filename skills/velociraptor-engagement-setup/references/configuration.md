@@ -168,6 +168,14 @@ the resolved values and sources with `vraptor ai config`.
   reference model. Unknown IDs and custom deployments show unverified limits and
   use saved/application fallbacks. Do not treat these offline API references as
   account discovery or managed-plan price guarantees.
+- On the Claude Code route, Opus/Sonnet 4.6 without `[1m]`, and every model while
+  `CLAUDE_CODE_DISABLE_1M_CONTEXT` is `1`, `true`, `yes` or `on`, use a 200000
+  context with 64000 output / 120000 input defaults (Haiku 5.5: 100000 input).
+  Setup and runtime read the variable from Claude Code's managed settings files,
+  the process environment and `.env` (not server-managed settings, MDM policies or
+  `~/.claude.json`), and pass it to Claude Code. While it is set, runtime lowers saved profile budgets that overflow 200K to
+  those defaults; rerun setup after changing it. See
+  [shared token budgets](../../../docs/model-execution.md#shared-token-budgets).
 - Setup selects output first and shows the exact remaining input maximum. `max`
   or `auto` at a prompt fills that field's available capacity. Prompt brackets
   show the calculated default, e.g. `Maximum input tokens [872000] (Enter to keep):`.

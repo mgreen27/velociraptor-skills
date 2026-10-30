@@ -16,7 +16,14 @@ from typing import Any, Mapping
 
 from vraptor.paths import RepositoryEnvironment
 from vraptor.paths import repository_environment
-from vraptor.agent.model_budgets import effort_label, effort_levels
+from vraptor.agent.model_budgets import (
+    CLAUDE_CODE_DISABLE_1M,
+    MIN_INPUT_TOKENS,
+    claude_code_1m_disabled,
+    claude_code_window,
+    effort_label,
+    effort_levels,
+)
 from vraptor.agent.registry import PROVIDERS, validate_endpoint
 from vraptor.agent import sources as config_sources
 
@@ -142,6 +149,8 @@ class ResolvedAgentRoute:
     model_context_tokens: int = 0
     model_max_output_tokens: int = 0
     read_timeout_seconds: int = 120
+    # False when CLAUDE_CODE_DISABLE_1M_CONTEXT holds the Claude Code route to 200K.
+    claude_code_1m_context: bool = True
     credential_variable: str = ""
     harness_credential_variable: str = ""
     field_sources: Mapping[str, SourceProvenance] = field(
@@ -211,6 +220,7 @@ class ResolvedAgentRoute:
             },
             "config_source_mode": self.config_source_mode,
             "codex_status": self.codex_status,
+            "claude_code_1m_context": self.claude_code_1m_context,
             "credential_binding": (
                 self.credential_binding.public_dict()
                 if self.credential_binding is not None
@@ -533,6 +543,7 @@ _FIELD_ENVIRONMENTS: Mapping[str, str] = MappingProxyType(
         "model_context_tokens": "AI_SKILLS_ANALYST_AGENT_MODEL_CONTEXT_TOKENS",
         "model_max_output_tokens": "AI_SKILLS_ANALYST_AGENT_MODEL_MAX_OUTPUT_TOKENS",
         "read_timeout_seconds": "AI_SKILLS_ANALYST_AGENT_READ_TIMEOUT_SECONDS",
+        "claude_code_disable_1m_context": CLAUDE_CODE_DISABLE_1M,
     }
 )
 
@@ -561,6 +572,7 @@ _APPLICATION_DEFAULTS: Mapping[str, Any] = MappingProxyType(
         "model_context_tokens": 0,
         "model_max_output_tokens": 0,
         "read_timeout_seconds": 120,
+        "claude_code_disable_1m_context": "",
     }
 )
 
@@ -1389,6 +1401,26 @@ def resolve_unresolved_agent_route(
         extras[name], source_values[name] = _selected_int(
             unresolved, name, minimum=1 if name == "read_timeout_seconds" else 0
         )
+    if route.protocol == "claude_agent_sdk":
+        extras["claude_code_1m_context"], source_values["claude_code_1m_context"] = (
+            _claude_code_1m_context(unresolved)
+        )
+    if not extras.get("claude_code_1m_context", True):
+        # Claude Code then runs every model at 200K, including [1m] variants;
+        # saved 1M limits must not reach the bounded analysis envelope.
+        disabled_by = source_values["claude_code_1m_context"]
+        context = claude_code_window()["context_tokens"]
+        output = context - MIN_INPUT_TOKENS
+        windowed = not 0 < extras["model_context_tokens"] <= context
+        if windowed:
+            extras["model_context_tokens"] = context
+            source_values["model_context_tokens"] = disabled_by
+        # An explicit smaller context keeps its own (possibly unset) output cap.
+        if extras["model_max_output_tokens"] > output or (
+            windowed and not extras["model_max_output_tokens"]
+        ):
+            extras["model_max_output_tokens"] = output
+            source_values["model_max_output_tokens"] = disabled_by
     if (
         extras["model_context_tokens"]
         and extras["model_max_output_tokens"] >= extras["model_context_tokens"]
@@ -1419,6 +1451,23 @@ def resolve_unresolved_agent_route(
         detected_harness=unresolved.selection.get("detected_harness", ""),
         **extras,
     )
+
+
+def _claude_code_1m_context(
+    unresolved: UnresolvedAgentConfig,
+) -> tuple[bool, SourceProvenance]:
+    """Whether Claude Code keeps 1M context, as its subprocess will see it."""
+    value, source = _selected_text(unresolved, "claude_code_disable_1m_context")
+    if managed := config_sources.claude_managed_env(CLAUDE_CODE_DISABLE_1M):
+        # Managed settings override the inherited environment.
+        value, location = managed
+        source = SourceProvenance(
+            kind="claude_managed_settings",
+            name=CLAUDE_CODE_DISABLE_1M,
+            location=location,
+            explicit=True,
+        )
+    return not claude_code_1m_disabled(value), source
 
 
 def _merged_environment(

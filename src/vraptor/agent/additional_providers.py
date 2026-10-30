@@ -273,6 +273,13 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                     "CLAUDE_CODE_USE_FOUNDRY": "",
                     "CLAUDE_CODE_USE_ANTHROPIC_AWS": "",
                     "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+                    # Keep Claude Code on the 200K window the budgets assume,
+                    # also when the setting came from a vraptor .env file.
+                    **(
+                        {}
+                        if self.configuration.route.claude_code_1m_context
+                        else {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}
+                    ),
                 },
                 include_partial_messages=True,
                 effort=self.configuration.reasoning_effort or None,
@@ -368,7 +375,17 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                             # Claude Code reports limit stops and refusals as
                             # errors; the streamed message_delta keeps the API
                             # stop reason.
-                            reported = stop if stop == "refusal" else api_stop
+                            reported = (
+                                stop
+                                if stop == "refusal"
+                                # Claude Code's API error text for an overlong
+                                # prompt, e.g. under unreadable managed settings.
+                                else "model_context_window_exceeded"
+                                if str(message.result or "").startswith(
+                                    "Prompt is too long"
+                                )
+                                else api_stop
+                            )
                             classification = (
                                 _STOP_CLASSIFICATIONS.get(reported)
                                 if message.subtype == "success"

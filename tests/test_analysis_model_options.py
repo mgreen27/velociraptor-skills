@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 from unittest import mock
 
 import pytest
@@ -250,6 +251,261 @@ def test_claude_code_route_bounds_4_6_input_to_200k(tmp_path, transport, maximum
     path = configuration(tmp_path, model="claude-opus-4-6", transport=transport)
     _, result = resolve(path, "--max-input-tokens", "max")
     assert result.maximum_input_tokens == maximum
+
+
+@pytest.mark.parametrize("transport", ["claude_agent_sdk", "api"])
+def test_disabled_1m_context_bounds_saved_claude_code_profile(tmp_path, transport):
+    path = configuration(
+        tmp_path,
+        model="claude-opus-5-5",
+        transport=transport,
+        model_context_tokens=1000000,
+        model_max_output_tokens=128000,
+        max_input_tokens=872000,
+        max_output_tokens=128000,
+    )
+    with mock.patch.dict("os.environ", {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "true"}):
+        execution = resolve_agent_execution(
+            repo_root=path.parent,
+            cli_values={"config_file": str(path)},
+            allow_missing_credentials=True,
+        )
+        bounded = limits.resolve_analysis_limits(
+            {}, execution=execution
+        ).for_execution(execution)
+        _, result = resolve(path, "--model-context-tokens", "max")
+    sdk = transport == "claude_agent_sdk"
+    route = execution.route
+    assert route.claude_code_1m_context is not sdk
+    assert route.model_context_tokens == (200000 if sdk else 1000000)
+    if sdk:
+        source = route.field_sources["model_context_tokens"]
+        assert source.name == "CLAUDE_CODE_DISABLE_1M_CONTEXT"
+        assert result.maximum_input_tokens + result.maximum_output_tokens <= 200000
+        # Saved 1M budgets are refitted to the 200K reference defaults.
+        assert (bounded.maximum_input_tokens, bounded.maximum_output_tokens) == (
+            120000,
+            64000,
+        )
+        assert bounded.field_sources["maximum_input_tokens"].name == source.name
+    else:
+        assert result.maximum_input_tokens == 872000
+
+
+DISABLE_1M = {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}
+
+
+def claude_code_document(tmp_path, drop=(), **profile):
+    path = tmp_path / "analyst-agents.toml"
+    work = {
+        "provider": "anthropic",
+        "model": "claude-opus-5-5",
+        "transport": "claude_agent_sdk",
+        "model_context_tokens": 1000000,
+        "model_max_output_tokens": 128000,
+        **profile,
+    }
+    for name in drop:
+        work.pop(name)
+    path.write_text(
+        manage._toml(
+            {
+                "schema_version": 2,
+                "selection": {"default_profile": "work"},
+                "profiles": {"work": work},
+            }
+        )
+    )
+    return path
+
+
+def default_path_limits(path):
+    # Host and hunt analysis resolve limits without an execution first.
+    with mock.patch.dict(
+        "os.environ", {"AI_SKILLS_ANALYST_AGENT_CONFIG_FILE": str(path)}
+    ):
+        execution = resolve_agent_execution(
+            repo_root=path.parent, allow_missing_credentials=True
+        )
+        unbound = limits.resolve_analysis_limits()
+    return execution, unbound.for_execution(execution)
+
+
+@pytest.mark.parametrize(
+    "profile,expected",
+    [
+        ({"max_input_tokens": 872000, "max_output_tokens": 128000}, (120000, 64000)),
+        # Only one saved field; the other keeps the application default.
+        ({"max_input_tokens": 872000}, (120000, 64000)),
+        # "max" fills the room the refitted partner leaves.
+        ({"max_input_tokens": 872000, "max_output_tokens": "max"}, (120000, 80000)),
+        ({"max_input_tokens": "max", "max_output_tokens": 128000}, (136000, 64000)),
+        ({"max_input_tokens": 150000, "max_output_tokens": 40000}, (150000, 40000)),
+    ],
+)
+@pytest.mark.parametrize("path_kind", ["default", "execution"])
+def test_disabled_1m_context_refits_saved_budgets_on_every_path(
+    tmp_path, profile, expected, path_kind
+):
+    path = claude_code_document(tmp_path, **profile)
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        if path_kind == "default":
+            execution, bounded = default_path_limits(path)
+        else:
+            execution = resolve_agent_execution(
+                repo_root=path.parent,
+                cli_values={"config_file": str(path)},
+                allow_missing_credentials=True,
+            )
+            bounded = limits.resolve_analysis_limits(
+                {}, execution=execution
+            ).for_execution(execution)
+    assert execution.route.model_context_tokens == 200000
+    assert execution.route.model_max_output_tokens == 100000
+    assert (bounded.maximum_input_tokens, bounded.maximum_output_tokens) == expected
+    # Idempotent: the runner bounds the planned limits again.
+    again = bounded.for_execution(execution)
+    assert (again.maximum_input_tokens, again.maximum_output_tokens) == expected
+
+
+def test_disabled_1m_context_keeps_usable_output_without_saved_budgets(tmp_path):
+    path = claude_code_document(tmp_path)
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        execution, bounded = default_path_limits(path)
+    assert not execution.route.analysis_profile
+    assert bounded.model_context_tokens == 200000
+    assert bounded.maximum_output_tokens > 32000
+    assert bounded.maximum_input_tokens + bounded.maximum_output_tokens <= 200000
+
+
+def test_disabled_1m_context_refits_saved_partner_of_cli_budget(tmp_path):
+    path = claude_code_document(tmp_path, max_input_tokens=872000, max_output_tokens=128000)
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        _, result = resolve(path, "--max-input-tokens", "120000")
+    assert (result.maximum_input_tokens, result.maximum_output_tokens) == (120000, 64000)
+
+
+def test_disabled_1m_context_bounds_environment_budgets_as_any_model(tmp_path):
+    path = claude_code_document(tmp_path, max_input_tokens=120000, max_output_tokens=64000)
+    environment = {**DISABLE_1M, "AI_SKILLS_MAX_INPUT_TOKENS": "872000"}
+    with mock.patch.dict("os.environ", environment):
+        _, bounded = default_path_limits(path)
+    # Not refitted as a saved budget: the shared model-envelope bound narrows it.
+    source = bounded.field_sources["maximum_input_tokens"]
+    assert (source.kind, source.name) == ("model_envelope", "maximum_input_tokens")
+    assert bounded.maximum_input_tokens + bounded.maximum_output_tokens <= 200000
+
+
+def test_disabled_1m_context_bounds_unlisted_model_overrides(tmp_path):
+    path = claude_code_document(tmp_path, model="custom-claude")
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        with pytest.raises(ValueError, match="exceeds model maximum 200000"):
+            resolve(path, "--model-context-tokens", "1000000")
+        _, result = resolve(path, "--model-context-tokens", "max")
+    assert result.model_context_tokens == 200000
+
+
+@pytest.mark.parametrize(
+    "managed,process,enabled",
+    [("1", None, False), ("0", "1", True), (None, "1", False), (None, None, True)],
+)
+def test_claude_managed_settings_override_the_environment(
+    tmp_path, monkeypatch, managed, process, enabled
+):
+    from vraptor.agent import sources
+
+    directory = tmp_path / "managed"
+    monkeypatch.setattr(sources, "DEFAULT_CLAUDE_MANAGED_SETTINGS_DIR", directory)
+    if managed is not None:
+        directory.mkdir()
+        (directory / "managed-settings.json").write_text(
+            json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": managed}})
+        )
+    path = claude_code_document(tmp_path)
+    environment = {"CLAUDE_CODE_DISABLE_1M_CONTEXT": process} if process else {}
+    with mock.patch.dict("os.environ", environment):
+        route = resolve_agent_execution(
+            repo_root=path.parent,
+            cli_values={"config_file": str(path)},
+            allow_missing_credentials=True,
+        ).route
+    assert route.claude_code_1m_context is enabled
+    source = route.field_sources["claude_code_1m_context"]
+    assert source.kind == (
+        "claude_managed_settings" if managed is not None else source.kind
+    )
+    assert route.model_context_tokens == (1000000 if enabled else 200000)
+
+
+def test_claude_managed_settings_ignore_hidden_drop_ins(tmp_path, monkeypatch):
+    from vraptor.agent import sources
+
+    directory = tmp_path / "managed"
+    (directory / "managed-settings.d").mkdir(parents=True)
+    for name, value in (
+        ("managed-settings.json", "1"),
+        ("managed-settings.d/.99-hidden.json", "0"),
+    ):
+        (directory / name).write_text(
+            json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": value}})
+        )
+    monkeypatch.setattr(sources, "DEFAULT_CLAUDE_MANAGED_SETTINGS_DIR", directory)
+    value, location = sources.claude_managed_env("CLAUDE_CODE_DISABLE_1M_CONTEXT")
+    assert (value, location) == ("1", str(directory / "managed-settings.json"))
+
+
+def test_disabled_1m_context_refits_saved_budgets_for_planning(tmp_path):
+    # Plan-only, skip-ai and snapshot preparation never call for_execution.
+    path = claude_code_document(tmp_path, max_input_tokens=872000, max_output_tokens=128000)
+    environment = {**DISABLE_1M, "AI_SKILLS_ANALYST_AGENT_CONFIG_FILE": str(path)}
+    with mock.patch.dict("os.environ", environment):
+        planned = limits.resolve_analysis_limits()
+    assert (planned.maximum_input_tokens, planned.maximum_output_tokens) == (120000, 64000)
+    assert planned.operational_context_tokens == 184000
+    with mock.patch.dict("os.environ", {"AI_SKILLS_ANALYST_AGENT_CONFIG_FILE": str(path)}):
+        planned = limits.resolve_analysis_limits()
+    assert (planned.maximum_input_tokens, planned.maximum_output_tokens) == (872000, 128000)
+
+
+def test_disabled_1m_context_narrows_environment_reserves_of_refitted_pair(tmp_path):
+    path = claude_code_document(tmp_path, max_input_tokens=872000, max_output_tokens=128000)
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        execution = resolve_agent_execution(
+            repo_root=path.parent,
+            cli_values={"config_file": str(path)},
+            allow_missing_credentials=True,
+        )
+    resolved = limits.resolve_analysis_limits(
+        {"AI_SKILLS_MAX_ANALYSIS_ITEM_TOKENS": "200000"}, execution=execution
+    )
+    assert resolved.maximum_input_tokens == 120000
+    assert resolved.maximum_evidence_tokens_per_item < 120000
+    source = resolved.field_sources["maximum_evidence_tokens_per_item"]
+    assert (source.kind, source.name) == ("model_envelope", "CLAUDE_CODE_DISABLE_1M_CONTEXT")
+
+
+def test_disabled_1m_context_keeps_explicit_small_context_without_output_cap(tmp_path):
+    path = claude_code_document(
+        tmp_path,
+        drop=("model_max_output_tokens",),
+        model="claude-haiku-4-5",
+        model_context_tokens=96000,
+        max_input_tokens=64000,
+        max_output_tokens=16000,
+    )
+    with mock.patch.dict("os.environ", DISABLE_1M):
+        execution, bounded = default_path_limits(path)
+    assert (execution.route.model_context_tokens, execution.route.model_max_output_tokens) == (96000, 0)
+    assert (bounded.maximum_input_tokens, bounded.maximum_output_tokens) == (64000, 16000)
+
+
+def test_max_output_reserves_minimum_input_while_1m_context_is_enabled(tmp_path):
+    # The saved input is not reserved: an override model narrows it instead.
+    path = claude_code_document(
+        tmp_path, transport="api", max_input_tokens=872000, max_output_tokens="max"
+    )
+    _, result = resolve(path, "--model", "claude-haiku-4-5")
+    assert (result.maximum_input_tokens, result.maximum_output_tokens) == (136000, 64000)
 
 
 def test_haiku_5_5_input_cannot_exceed_standard_price_tier(tmp_path):
