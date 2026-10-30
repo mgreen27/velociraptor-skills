@@ -131,14 +131,7 @@ def validate_forward_outputs(
         raise RuntimeError("forward stdout status does not match durable checkpoint")
     if bool(checkpoint.get("evidence_persisted")) or bool(state.get("evidence_persisted")):
         raise RuntimeError("forward run unexpectedly persisted raw evidence")
-    expected_checkpoint_fingerprint = host_analysis_state.canonical_hash(
-        {
-            key: value
-            for key, value in checkpoint.items()
-            if key not in {"completed_at", "checkpoint_fingerprint"}
-        }
-    )
-    if str(checkpoint.get("checkpoint_fingerprint") or "") != expected_checkpoint_fingerprint:
+    if not host_analysis_state.request_checkpoint_valid(checkpoint):
         raise RuntimeError("request checkpoint fingerprint does not validate")
     synthesis = dict(state.get("synthesis") or {})
     if str(synthesis.get("request_checkpoint_sha256") or "") != sha256_file(

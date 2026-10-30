@@ -10,8 +10,9 @@ names. Artifact-profile normalization remains separate because it strips values
 and discards empty entries.
 `common.labels.parse_label_values` owns set-valued server-label parsing for
 readiness and hunt scope matching, retaining both existing module import names.
-Client-query label parsing remains separate because it returns a sorted list and
-discards empty scalar values.
+Client queries adapt it to a sorted list without empty values.
+`common.clock` owns second-resolution UTC timestamps and the ISO-8601 UTC parser
+shared by client queries and hunt retry scheduling.
 Use `vraptor`; `dfir` remains a legacy alias of the same `vraptor.cli:main`
 entry point, kept for compatibility. The repository launchers only select the
 interpreter and import path; Python owns configuration and dotenv precedence.

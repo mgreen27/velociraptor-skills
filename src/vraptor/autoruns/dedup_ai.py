@@ -10,6 +10,7 @@ import time
 from importlib import resources
 from itertools import chain
 from vraptor.common import token_budget
+from vraptor.common.hashing import sha256_json
 from pathlib import Path
 
 from vraptor.autoruns import ai_review as ai
@@ -23,8 +24,7 @@ FIELDS = (*review.FIELDS, "TotalRows")
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-        separators=(",", ":")).encode()).hexdigest()
+    return sha256_json(value, ensure_ascii=False, default=None)
 
 
 def identity(row):

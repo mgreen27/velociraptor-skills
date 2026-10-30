@@ -8,7 +8,6 @@ import argparse
 from contextlib import closing
 import base64
 import csv
-import fcntl
 import fnmatch
 import functools
 import gzip
@@ -29,7 +28,9 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from vraptor.common import atomic_io
+from vraptor.common.clock import now_utc
 from vraptor import paths as dfir_paths
+from vraptor.common.hashing import canonical_json
 from vraptor.common.hashing import sha256_file as file_sha256
 from vraptor import api as velociraptor_api
 from vraptor.autoruns import pipeline as autoruns
@@ -102,20 +103,6 @@ REQUIRED_METADATA = {
 }
 
 
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stable_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=str,
-    )
-
-
 def field(
     row: dict[str, Any],
     *names: str,
@@ -176,7 +163,7 @@ def context_payload(row: dict[str, Any]) -> dict[str, str]:
 
 def context_key(payload: dict[str, str]) -> str:
     return hashlib.sha256(
-        stable_json(payload).encode("utf-8")
+        canonical_json(payload).encode("utf-8")
     ).hexdigest()
 
 
@@ -500,7 +487,7 @@ class RmmClassifier:
             if str(value).strip()
         }
         self.reference_hash = hashlib.sha256(
-            stable_json(payload).encode("utf-8")
+            canonical_json(payload).encode("utf-8")
         ).hexdigest()
 
     def regex(self) -> str:
@@ -855,7 +842,7 @@ def promote_records(
         build_metadata = {
             "build_mode": "delta" if baseline_paths else "full",
             "baseline_database_count": str(len(baseline_paths)),
-            "baseline_database_sha256s": stable_json(
+            "baseline_database_sha256s": canonical_json(
                 sorted(file_sha256(path) for path in baseline_paths)
             ),
         }
@@ -1168,14 +1155,14 @@ def live_lookup_payload(
                 })
     finally:
         connection.close()
-    serialized = stable_json(keys).encode("utf-8")
+    serialized = canonical_json(keys).encode("utf-8")
     compressed = gzip.compress(
         serialized,
         compresslevel=PUBLISH_GZIP_LEVEL,
         mtime=0,
     )
     encoded = base64.b64encode(compressed).decode("ascii")
-    regex_serialized = stable_json(regex_rules).encode("utf-8") if regex_rules else b""
+    regex_serialized = canonical_json(regex_rules).encode("utf-8") if regex_rules else b""
     regex_compressed = (
         gzip.compress(regex_serialized, compresslevel=PUBLISH_GZIP_LEVEL, mtime=0)
         if regex_rules else b""
@@ -1229,7 +1216,7 @@ def merge_databases(
             merge_metadata = {
                 "build_mode": "merged",
                 "source_database_count": str(len(source_paths)),
-                "source_database_sha256s": stable_json(
+                "source_database_sha256s": canonical_json(
                     sorted(file_sha256(path) for path in source_paths)
                 ),
             }
@@ -1549,20 +1536,17 @@ def apply_delta_database(
             backup_dir=backup_dir,
             rmm_reference=rmm_reference,
         )
+    from vraptor.autoruns.regex_store import golden_db_lock
+
     target.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = target.with_name(f".{target.name}.lock")
-    with lock_path.open("a+b") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            return _apply_delta_database_locked(
-                target,
-                delta,
-                dry_run=dry_run,
-                backup_dir=backup_dir,
-                rmm_reference=rmm_reference,
-            )
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with golden_db_lock(target):
+        return _apply_delta_database_locked(
+            target,
+            delta,
+            dry_run=dry_run,
+            backup_dir=backup_dir,
+            rmm_reference=rmm_reference,
+        )
 
 
 def lookup_hashes(database: Path, hashes: Iterable[str]) -> list[dict[str, Any]]:

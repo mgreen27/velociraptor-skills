@@ -14,12 +14,13 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from vraptor.common import atomic_io
-from vraptor.common.hashing import sha256_file
+from vraptor.common.clock import now_utc
+from vraptor.common.hashing import canonical_json, sha256_file
 from vraptor.common.sequences import unique_ordered as dedupe
 from vraptor.api import VeloApiClient
 from vraptor.api import grpc
@@ -370,20 +371,12 @@ class CollectionRequest:
     flow_timeout_seconds: int | None = None
 
 
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def slugify(value: str) -> str:
     return "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-").replace("--", "-")
 
 
-def stable_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
-
-
 def short_signature(value: Any) -> str:
-    return hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()[:12]
 
 
 def normalize_collection_label(label: str) -> str:
@@ -1195,9 +1188,7 @@ def write_system_identity(
     )
 
 
-def write_json(path: Path, payload: Any) -> None:
-    rendered = json.dumps(payload, indent=2, sort_keys=False) + "\n"
-    atomic_io.write_text_atomic(path, rendered)
+write_json = atomic_io.write_json_atomic
 
 
 def collection_groups_for_artifact(

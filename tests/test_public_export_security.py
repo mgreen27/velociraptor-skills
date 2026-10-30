@@ -135,6 +135,27 @@ def test_invalid_or_overlapping_manifest_is_reported(tmp_path, monkeypatch, mani
     assert errors
 
 
+def test_manifest_and_state_errors_are_all_reported(tmp_path, monkeypatch):
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    for setting in ("MANIFEST", "STATE"):
+        monkeypatch.setattr(validator, setting, tmp_path / setting.lower())
+    validator.MANIFEST.write_text("a\tb\tbad\n../a\tb\tfile\na\tb/c\ttree\n")
+    validator.STATE.write_text(json.dumps({"schema_version": 1, "files": {
+        "x": "not a record", "y": {"ai_path": "a", "public_path": "b"},
+    }}))
+    errors = []
+    validator.check_manifest(errors)
+    validator.check_state(errors)
+    assert errors == [
+        "invalid manifest row: manifest:1",
+        "unsafe manifest source: ../a",
+        "overlapping manifest paths at line 3",
+        "invalid sync state record 1",
+        "invalid sync state paths or key in record 2",
+        "invalid sync fingerprint in record 2",
+    ]
+
+
 def test_force_added_log_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     path = tmp_path / ".local/public-checks.jsonl"

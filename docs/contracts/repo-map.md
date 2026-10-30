@@ -48,7 +48,7 @@ other commands that name `cli.py`; every other area goes to
 | `autoruns/` | Autoruns GoldenDB build, review and publication | `golden.py` (~3.8k) |
 | `artifacts/` | Artifact selection policy, profiles, scenarios, schema checks | `inventory.py`, `profiles.py` |
 | `agent/` | AI provider configuration, runners and diagnostics | `config.py`, `runtime.py`, `manage.py` |
-| `logging/`, `common/` | Operation and token-usage logs; small shared helpers | |
+| `logging/`, `common/` | Operation and token-usage logs; small shared helpers (`clock.py` UTC timestamps, `hashing.py` canonical JSON and SHA-256, `atomic_io.py` atomic writes) | |
 | `resources/` | Packaged JSON policy, VQL, shell scripts, GoldenDB | |
 | top level | `api.py` (Velociraptor gRPC API), `settings.py`, `readiness.py`, `paths.py`, `case_layout.py` | |
 

@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, TypeVar
 
 from vraptor.agent import diagnostics as agent_diagnostics
 from vraptor.common import atomic_io
+from vraptor.common.clock import now_utc
 from vraptor.common import token_budget
 from vraptor.logging import operations as operation_log
 from vraptor.agent.config import ResolvedAgentExecution
@@ -31,10 +32,6 @@ _PROVIDER_GATES: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[tuple[str, str, str], "_ProviderGate"]
 ] = weakref.WeakKeyDictionary()
 RATE_LIMIT_FALLBACK_SECONDS = 60.0
-
-
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)

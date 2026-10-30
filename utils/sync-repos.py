@@ -20,9 +20,11 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 from public_audit import append_audit, finding_metadata
+from sync_policy import (
+    SCHEMA_VERSION, Mapping, PolicyError, load_deny_patterns, load_manifest, load_state, pair_key,
+    validate_relative_path,
+)
 
-
-SCHEMA_VERSION = 1
 
 # ai_skills keeps the runtime under packages/vraptor; this repository is flat.
 # Comparisons and imports read ai_skills text through these rewrites.
@@ -45,14 +47,6 @@ PUBLIC_DOCS_ROOT_LINK = re.compile(rb"\.\./(?!reference/|contracts/)")
 
 class SyncError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class Mapping:
-    ai_path: str
-    public_path: str
-    kind: str
-    exclude: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,64 +92,6 @@ def run_git(
     if text:
         return proc.stdout.decode("utf-8", "strict")
     return proc.stdout
-
-
-def validate_relative_path(raw: str, label: str) -> str:
-    if not isinstance(raw, str) or not raw:
-        raise SyncError(f"invalid {label} path")
-    path = PurePosixPath(raw)
-    if path.is_absolute() or not path.parts or ".." in path.parts or path.as_posix() != raw:
-        raise SyncError(f"invalid {label} path: {raw!r}")
-    return path.as_posix()
-
-
-def load_manifest(path: Path) -> list[Mapping]:
-    mappings: list[Mapping] = []
-    seen_ai: set[str] = set()
-    seen_public: set[str] = set()
-    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        fields = raw.split("\t")
-        if len(fields) not in {3, 4}:
-            raise SyncError(f"{path}:{line_number}: expected three or four tab-separated fields")
-        ai_path = validate_relative_path(fields[0].strip(), "ai_skills")
-        public_path = validate_relative_path(fields[1].strip(), "public")
-        kind = fields[2].strip()
-        if kind not in {"file", "tree"}:
-            raise SyncError(f"{path}:{line_number}: kind must be file or tree")
-        exclude = tuple(glob.strip() for glob in fields[3].split(",")) if len(fields) == 4 else ()
-        if exclude and (kind != "tree" or not all(exclude)):
-            raise SyncError(f"{path}:{line_number}: exclude globs need a tree row and non-empty patterns")
-        if ai_path in seen_ai or public_path in seen_public:
-            raise SyncError(f"{path}:{line_number}: duplicate manifest path")
-        for previous in mappings:
-            for current, prior in ((ai_path, previous.ai_path), (public_path, previous.public_path)):
-                if current.startswith(prior + "/") or prior.startswith(current + "/"):
-                    raise SyncError(f"{path}:{line_number}: overlapping manifest paths")
-        seen_ai.add(ai_path)
-        seen_public.add(public_path)
-        mappings.append(Mapping(ai_path, public_path, kind, exclude))
-    if not mappings:
-        raise SyncError(f"manifest has no mappings: {path}")
-    return mappings
-
-
-def load_deny_patterns(path: Path) -> list[tuple[str, re.Pattern[str]]]:
-    patterns: list[tuple[str, re.Pattern[str]]] = []
-    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        fields = raw.split("\t", 1)
-        if len(fields) != 2:
-            raise SyncError(f"{path}:{line_number}: expected label and regex")
-        try:
-            patterns.append((fields[0], re.compile(fields[1], re.IGNORECASE)))
-        except re.error as exc:
-            raise SyncError(f"{path}:{line_number}: invalid regex: {exc}") from exc
-    return patterns
 
 
 def ensure_repo(path: Path) -> Path:
@@ -304,29 +240,6 @@ def check_source_clean(repo: Path, mappings: Iterable[Mapping], direction: str) 
             + ", ".join(names)
             + suffix
         )
-
-
-def load_state(path: Path) -> dict:
-    if not path.exists():
-        return {"schema_version": SCHEMA_VERSION, "files": {}}
-    state = json.loads(path.read_text(encoding="utf-8"))
-    if (not isinstance(state, dict) or state.get("schema_version") != SCHEMA_VERSION
-            or not isinstance(state.get("files"), dict)):
-        raise SyncError(f"unsupported or malformed sync state: {path}")
-    for key, record in state["files"].items():
-        if not isinstance(record, dict):
-            raise SyncError(f"malformed sync state record: {path}")
-        ai_path = validate_relative_path(record.get("ai_path"), "sync state ai_skills")
-        public_path = validate_relative_path(record.get("public_path"), "sync state public")
-        fingerprint = record.get("fingerprint")
-        if (key != pair_key(ai_path, public_path) or not isinstance(fingerprint, str)
-                or not re.fullmatch(r"sha256:[0-9a-f]{64};mode:100(?:644|755)", fingerprint)):
-            raise SyncError(f"malformed sync state key or fingerprint: {path}")
-    return state
-
-
-def pair_key(ai_path: str, public_path: str) -> str:
-    return f"{ai_path} => {public_path}"
 
 
 def suffix_for(path: str, base: str, kind: str) -> str:
@@ -790,6 +703,6 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, json.JSONDecodeError, SyncError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError, PolicyError, SyncError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2)

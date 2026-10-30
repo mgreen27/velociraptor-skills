@@ -205,13 +205,9 @@ def expected_cache_identity(
     }
 
 
-def artifact_base_name(name: str) -> str:
-    return str(name).split("[", 1)[0].strip()
-
-
 def artifact_name_matches(candidate: str, expected: str) -> bool:
-    candidate_name = artifact_base_name(candidate)
-    expected_name = artifact_base_name(expected)
+    candidate_name = artifact_profiles.artifact_base_name(candidate)
+    expected_name = artifact_profiles.artifact_base_name(expected)
     return bool(candidate_name and expected_name and candidate_name == expected_name)
 
 

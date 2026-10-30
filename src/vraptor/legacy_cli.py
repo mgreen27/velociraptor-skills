@@ -250,17 +250,6 @@ def _command_label(args: list[str]) -> str:
     return ".".join(parts) or "velociraptor"
 
 
-def _option_value(args: list[str], *names: str) -> str:
-    for index, item in enumerate(args):
-        for name in names:
-            if item == name and index + 1 < len(args):
-                return args[index + 1]
-            prefix = name + "="
-            if item.startswith(prefix):
-                return item[len(prefix) :]
-    return ""
-
-
 def _option_values(args: list[str], *names: str) -> list[str]:
     values: list[str] = []
     index = 0
@@ -285,7 +274,7 @@ def _option_values(args: list[str], *names: str) -> list[str]:
 
 
 def _integer_option(args: list[str], *names: str) -> int | None:
-    value = _option_value(args, *names)
+    value = operation_log.cli_option(args, *names)
     if not value:
         return None
     try:
@@ -297,7 +286,7 @@ def _integer_option(args: list[str], *names: str) -> int | None:
 def _record_command_context(args: list[str]) -> None:
     """Record only allowlisted command options; never persist raw argv."""
     artifacts = _option_values(args, "--artifact")
-    engagement_id = _option_value(
+    engagement_id = operation_log.cli_option(
         args,
         "--engagement-id",
         "--investigation-id",
@@ -309,18 +298,18 @@ def _record_command_context(args: list[str]) -> None:
         command=_command_label(args),
         scope="hunt" if args and args[0] == "hunt" else "collection" if args and args[0] == "collect" else None,
         engagement_id=engagement_id,
-        server_profile=_option_value(args, "--server-profile"),
-        client_id=_option_value(args, "--client-id"),
-        hostname=_option_value(args, "--host", "--hostname"),
-        hunt_id=_option_value(args, "--hunt-id"),
-        request_id=_option_value(args, "--request-id"),
+        server_profile=operation_log.cli_option(args, "--server-profile"),
+        client_id=operation_log.cli_option(args, "--client-id"),
+        hostname=operation_log.cli_option(args, "--host", "--hostname"),
+        hunt_id=operation_log.cli_option(args, "--hunt-id"),
+        request_id=operation_log.cli_option(args, "--request-id"),
         artifact=artifacts[0] if len(artifacts) == 1 else "",
         artifacts="+".join(artifacts) if len(artifacts) > 1 else "",
         artifact_count=len(artifacts) if artifacts else None,
-        bundle=_option_value(args, "--bundle"),
-        collection_type=_option_value(args, "--collection-type"),
-        analysis_mode=_option_value(args, "--analysis-mode"),
-        target_mode=_option_value(args, "--target-mode"),
+        bundle=operation_log.cli_option(args, "--bundle"),
+        collection_type=operation_log.cli_option(args, "--collection-type"),
+        analysis_mode=operation_log.cli_option(args, "--analysis-mode"),
+        target_mode=operation_log.cli_option(args, "--target-mode"),
         timeout_seconds=_integer_option(
             args,
             "--poll-timeout-seconds",
@@ -332,15 +321,11 @@ def _record_command_context(args: list[str]) -> None:
     )
 
 
-def _bind_default_log(args: list[str]) -> None:
-    operation_log.bind_cli_destination(args)
-
-
 def main(argv: list[str] | None = None, *, dispatch=None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     def run(args):
-        _bind_default_log(args)
+        operation_log.bind_cli_destination(args)
         _record_command_context(args)
         from .analyze import reporting
         return reporting.run_with_policy(args, dispatch or _dispatch)

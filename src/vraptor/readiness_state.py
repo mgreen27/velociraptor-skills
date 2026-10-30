@@ -16,7 +16,7 @@ from cryptography.x509.oid import NameOID
 
 from vraptor.common import atomic_io
 from vraptor import case_layout
-from vraptor.common.hashing import sha256_file
+from vraptor.common.hashing import sha256_file, sha256_json
 
 
 SCHEMA_VERSION = 5
@@ -28,13 +28,7 @@ def state_path(case_root: Path, engagement_id: str) -> Path:
 
 
 def _canonical_hash(value: Any) -> str:
-    rendered = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return hashlib.sha256(rendered).hexdigest()
+    return sha256_json(value, default=None)
 
 
 def _certificate_time(value: datetime) -> datetime:

@@ -250,17 +250,7 @@ def _host_report_checkpoints(
             "failed",
         }:
             continue
-        expected_checkpoint_fingerprint = host_analysis_state.canonical_hash(
-            {
-                key: value
-                for key, value in checkpoint.items()
-                if key not in {"completed_at", "checkpoint_fingerprint"}
-            }
-        )
-        if (
-            str(checkpoint.get("checkpoint_fingerprint") or "")
-            != expected_checkpoint_fingerprint
-        ):
+        if not host_analysis_state.request_checkpoint_valid(checkpoint):
             continue
         if expected_hostname and str(checkpoint.get("hostname") or "") != expected_hostname:
             continue
@@ -1945,9 +1935,7 @@ async def _execute_incremental_analysis(
     if paths["request_checkpoint"].is_file():
         try:
             saved = json.loads(paths["request_checkpoint"].read_text())
-            expected = host_analysis_state.canonical_hash({k: v for k, v in saved.items()
-                if k not in {"checkpoint_fingerprint", "completed_at"}})
-            if expected == saved.get("checkpoint_fingerprint"):
+            if host_analysis_state.request_checkpoint_valid(saved):
                 saved_cache = saved.get("synthesis_cache") or {}
         except (ValueError, OSError):
             pass
