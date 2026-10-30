@@ -9,10 +9,11 @@ by both workflows.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
+
+from vraptor.common import hashing
+from vraptor.common.clock import now_utc
 
 
 SCHEMA_VERSION = 7
@@ -50,18 +51,8 @@ FAILURE_STATE_FRAGMENTS = (
 )
 
 
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
+    return hashing.canonical_json(value, ensure_ascii=False)
 
 
 def sha256_identity(prefix: str, value: Any, *, length: int = 32) -> str:

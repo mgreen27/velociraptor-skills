@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import subprocess
 
 import pytest
 
 from vraptor import paths, settings
+from vraptor.resources import resource_root
 
 
 @pytest.fixture
@@ -266,6 +268,41 @@ def test_dotenv_does_not_execute_or_import_dangerous_keys(workstation):
     assert snapshot.environment["API_SECRET"] == "$(touch SENTINEL)"
     assert "PYTHONPATH" not in snapshot.environment
     assert snapshot.environment["PATH"] == os.defpath
+
+
+def shell_dotenv_values(path, *keys):
+    loaded = subprocess.run(
+        ["bash", "-c", 'source "$1" && _load_dotenv_file_safely "$2" "" && shift 2 && for key; do printf "%s\\0" "${!key}"; done',
+         "bash", str(resource_root() / "scripts/load_repo_env.sh"), str(path), *keys],
+        capture_output=True, text=True, check=True, env={"PATH": os.environ.get("PATH", os.defpath)},
+    )
+    return dict(zip(keys, loaded.stdout.split("\0")))
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ('"abc123" # rotated', "abc123"),
+    ("'abc123'\t# rotated", "abc123"),
+    ('"abc123"# rotated', "abc123"),
+    ('"a # b" # rotated "c"', "a # b"),
+    ('"" # rotated', ""),
+    ("abc123 # rotated", "abc123"),
+    ("abc123\t# rotated", "abc123"),
+    (" # rotated", ""),
+    ('"abc123"', "abc123"),
+    ("abc123", "abc123"),
+])
+def test_dotenv_inline_comment_matches_shell_loader(tmp_path, raw, expected):
+    path = tmp_path / ".env"
+    path.write_text(f"API_SECRET={raw}\n")
+    assert paths.read_dotenv_file(path) == shell_dotenv_values(path, "API_SECRET") == {"API_SECRET": expected}
+    assert " ".join(shlex.split(raw, comments=True)) == expected
+
+
+def test_dotenv_keeps_hash_inside_a_value(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("API_SECRET=abc#123\nCHANNEL=#alerts\nQUOTED=\"a#b\"\n")
+    expected = {"API_SECRET": "abc#123", "CHANNEL": "#alerts", "QUOTED": "a#b"}
+    assert paths.read_dotenv_file(path) == shell_dotenv_values(path, *expected) == expected
 
 
 def test_apply_keeps_explicit_and_sets_supported_unset_fields(workstation):

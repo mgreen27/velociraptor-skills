@@ -13,6 +13,7 @@ from typing import Any, Iterable, Mapping
 from vraptor.analyze import references as evidence_references
 from vraptor.analyze.reporting import current_policy
 from vraptor.analyze.report_priority import display_priority, priority_key, priority_metadata, rank_findings
+from vraptor.common.hashing import canonical_json
 
 
 SUPPLEMENT_VALUE_CHARS = 600
@@ -84,16 +85,6 @@ def safe_artifact_name(value: str) -> str:
 
 def artifact_report_file(root: Path, artifact: str) -> Path:
     return root / f"{safe_artifact_name(artifact)}.md"
-
-
-def _canonical(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
 
 
 def _visible_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
@@ -195,12 +186,14 @@ def representative_examples(
     limit = current_policy().examples_per_finding if limit is None else limit
     examples: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw in sorted(evidence_rows, key=_canonical):
+    for raw in sorted(
+        evidence_rows, key=lambda row: canonical_json(row, ensure_ascii=False)
+    ):
         evidence = dict(raw)
         fields = _visible_fields(dict(evidence.get("fields") or {}))
         if not fields:
             continue
-        identity = _canonical(fields)
+        identity = canonical_json(fields, ensure_ascii=False)
         if identity in seen:
             continue
         seen.add(identity)
@@ -269,7 +262,7 @@ def compact_result(
                     str(finding.get("example_coverage") or ("retained_examples_only" if finding.get("examples") else "unavailable"))
                 ),
                 "available_example_count": (
-                    len({_canonical(_visible_fields(dict(item.get("fields") or {}))) for item in evidence if _visible_fields(dict(item.get("fields") or {}))})
+                    len({canonical_json(_visible_fields(dict(item.get("fields") or {})), ensure_ascii=False) for item in evidence if _visible_fields(dict(item.get("fields") or {}))})
                     if has_source_evidence else int(finding.get("available_example_count", len(finding.get("examples") or [])))
                 ),
                 "examples": (
@@ -351,7 +344,7 @@ def prioritized_context(items: Iterable[Any], findings: Iterable[Mapping[str, An
     return sorted(items, key=lambda item: (
         priority_key(by_id.get(str(item.get("finding_id") or ""), item))
         if isinstance(item, Mapping) else priority_key({}),
-        _canonical(item),
+        canonical_json(item, ensure_ascii=False),
     ))
 
 
@@ -951,7 +944,7 @@ def _full_evidence_groups(
             if not selected_fields or not full_fields:
                 continue
             artifact = str(evidence.get("artifact") or "")
-            key = (artifact, _canonical(selected_fields))
+            key = (artifact, canonical_json(selected_fields, ensure_ascii=False))
             group = groups.setdefault(
                 key,
                 {
@@ -1192,26 +1185,28 @@ def consolidate_exact_findings(
         if priority_key(finding) < priority_key(target):
             target.update(priority_metadata(finding))
         seen = {
-            _canonical(
+            canonical_json(
                 {
                     "artifact": item.get("artifact"),
                     "chunk_index": item.get("chunk_index"),
                     "ref": item.get("ref"),
                     "source": item.get("source"),
                     "fields": item.get("fields"),
-                }
+                },
+                ensure_ascii=False,
             )
             for item in target["evidence"]
         }
         for evidence in original_evidence:
-            identity = _canonical(
+            identity = canonical_json(
                 {
                     "artifact": evidence.get("artifact"),
                     "chunk_index": evidence.get("chunk_index"),
                     "ref": evidence.get("ref"),
                     "source": evidence.get("source"),
                     "fields": evidence.get("fields"),
-                }
+                },
+                ensure_ascii=False,
             )
             if identity not in seen:
                 target["evidence"].append(copy.deepcopy(evidence))

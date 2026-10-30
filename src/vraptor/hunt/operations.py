@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from vraptor.resources import repository_root
 REPO_ROOT = repository_root()
@@ -19,9 +19,11 @@ from vraptor import context as engagement_context
 from vraptor.logging import operations as operation_log
 from vraptor.artifacts import persistence as persistence_policy
 from vraptor.analyze import identity as run_identity
+from vraptor.api import is_resource_exhausted_error
 
 from vraptor.common import atomic_io
-from vraptor.common.hashing import sha256_file
+from vraptor.common.clock import now_utc
+from vraptor.common.hashing import canonical_json, sha256_file
 from vraptor.common.labels import parse_label_values
 from vraptor.common.sequences import unique_ordered
 from vraptor.paths import add_case_root_arg
@@ -188,13 +190,7 @@ class HuntTargetScope:
         return self.requested_os or UNSCOPED_TARGET_NAMESPACE
 
 
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def write_json(path: Path, payload: Any) -> None:
-    rendered = json.dumps(payload, indent=2, sort_keys=False) + "\n"
-    atomic_io.write_text_atomic(path, rendered)
+write_json = atomic_io.write_json_atomic
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> int:
@@ -251,11 +247,6 @@ def get_downloads_dir(investigation_id: str, hunt_id: str) -> Path:
 
 def baseline_targets_path(investigation_id: str, hunt_id: str) -> Path:
     return hunt_dir(investigation_id, hunt_id) / "baseline-targets.json"
-
-
-def stable_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
-
 
 
 def parse_json_list(value: Any) -> list[str]:
@@ -1046,27 +1037,6 @@ def query_hunt_results(api: Any, hunt_id: str, artifact_name: str) -> list[dict[
     )
 
 
-def is_resource_exhausted_error(exc: Exception) -> bool:
-    code_method = getattr(exc, "code", None)
-    if not callable(code_method):
-        return False
-    try:
-        code = code_method()
-        expected = collection.grpc.StatusCode.RESOURCE_EXHAUSTED
-        if code == expected:
-            return True
-        # Test loaders and some gRPC wrappers may expose an equivalent
-        # StatusCode enum from another module instance. Compare the stable
-        # symbolic name as a compatibility fallback instead of relying only
-        # on enum identity.
-        return (
-            getattr(code, "name", "") == "RESOURCE_EXHAUSTED"
-            or str(code).rsplit(".", 1)[-1] == "RESOURCE_EXHAUSTED"
-        )
-    except Exception:
-        return False
-
-
 def query_hunt_results_resilient(
     api: Any,
     hunt_id: str,
@@ -1168,7 +1138,7 @@ def review_request_signature(
         "artifact_profile_hashes": artifact_profile_hashes or [],
         "effective_stack_ids": effective_stack_ids or {},
     }
-    return hashlib.sha256(stable_json(payload).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:12]
 
 
 def review_artifact_source_vql(source: str | None = None) -> str:
@@ -2569,8 +2539,8 @@ def create_hunt(
     signature = request_signature(request, target_os, include_labels, exclude_labels)
     description = build_hunt_description(investigation_id, target_name, signature, scope.requested_os)
     artifacts = unique_ordered([spec.artifact for spec in request.expected_specs])
-    specs_json = stable_json([collection.spec_to_request_dict(spec) for spec in request.expected_specs])
-    tags_json = stable_json(
+    specs_json = canonical_json([collection.spec_to_request_dict(spec) for spec in request.expected_specs])
+    tags_json = canonical_json(
         combined_hunt_tags(
             investigation_id,
             target_name,
@@ -2584,7 +2554,7 @@ def create_hunt(
     effective_start_paused = True
 
     query_env = {
-        "ArtifactsJson": stable_json(artifacts),
+        "ArtifactsJson": canonical_json(artifacts),
         "SpecsJson": specs_json,
         "Description": description,
         "TagsJson": tags_json,
@@ -2592,9 +2562,9 @@ def create_hunt(
     if scope.server_os:
         query_env["TargetOS"] = scope.server_os
     if scope.include_labels:
-        query_env["IncludeLabelsJson"] = stable_json(list(scope.include_labels))
+        query_env["IncludeLabelsJson"] = canonical_json(list(scope.include_labels))
     if scope.exclude_labels:
-        query_env["ExcludeLabelsJson"] = stable_json(list(scope.exclude_labels))
+        query_env["ExcludeLabelsJson"] = canonical_json(list(scope.exclude_labels))
 
     rows = api.query(
         build_create_hunt_vql(scope),
@@ -3770,9 +3740,16 @@ def command_stop(args: argparse.Namespace) -> dict[str, Any]:
     return slim_stop_output(payload)
 
 
-def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
+def _command_hunt_results(
+    args: argparse.Namespace,
+    *,
+    command_name: str,
+    action: str,
+    write_results: Callable[..., dict[str, Any]],
+    action_payload: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
     with collection.VeloApiClient(args.api_client_path, org_id=args.org_id) as api:
-        resolved = resolve_saved_or_explicit_hunt(args, api, command_name="export-results")
+        resolved = resolve_saved_or_explicit_hunt(args, api, command_name=command_name)
         saved_state = resolved["saved_state"]
         hunt_id = str(resolved["hunt_id"])
         request = resolved["request"]
@@ -3781,7 +3758,7 @@ def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
         if hunt_row is None:
             raise RuntimeError(f"Hunt {hunt_id} was not found.")
         raise_for_hunt_validation_errors(hunt_row, request)
-        manifest = export_hunt(
+        manifest = write_results(
             api,
             args.investigation_id,
             hunt_id,
@@ -3790,10 +3767,10 @@ def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     payload = {
-        "action": "exported_hunt_results",
+        "action": action,
         "hunt_id": hunt_id,
         "hunt_description": str(hunt_row.get("hunt_description") or ""),
-        **export_action_payload(manifest),
+        **action_payload(manifest),
     }
     if args.hunt_id:
         payload["target_name"] = profile
@@ -3828,61 +3805,23 @@ def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def command_download_results(args: argparse.Namespace) -> dict[str, Any]:
-    with collection.VeloApiClient(args.api_client_path, org_id=args.org_id) as api:
-        resolved = resolve_saved_or_explicit_hunt(args, api, command_name="download-results")
-        saved_state = resolved["saved_state"]
-        hunt_id = str(resolved["hunt_id"])
-        request = resolved["request"]
-        profile = str(resolved["profile"])
-        hunt_row = resolved["hunt_row"] or query_single_hunt(api, hunt_id)
-        if hunt_row is None:
-            raise RuntimeError(f"Hunt {hunt_id} was not found.")
-        raise_for_hunt_validation_errors(hunt_row, request)
-        manifest = download_hunt_results(
-            api,
-            args.investigation_id,
-            hunt_id,
-            request,
-            artifact_sources=hunt_result_artifact_sources(hunt_row),
-        )
+def command_export_results(args: argparse.Namespace) -> dict[str, Any]:
+    return _command_hunt_results(
+        args,
+        command_name="export-results",
+        action="exported_hunt_results",
+        write_results=export_hunt,
+        action_payload=export_action_payload,
+    )
 
-    payload = {
-        "action": "downloaded_hunt_results",
-        "hunt_id": hunt_id,
-        "hunt_description": str(hunt_row.get("hunt_description") or ""),
-        **download_action_payload(manifest),
-    }
-    if args.hunt_id:
-        payload["target_name"] = profile
-        if saved_state:
-            payload["saved_state_updated"] = True
-            return persist_state(
-                args.investigation_id,
-                str(saved_state.get("profile") or profile),
-                request,
-                {
-                    "hunt_id": hunt_id,
-                    "hunt_description": str(hunt_row.get("hunt_description") or ""),
-                    "target_os": str((saved_state or {}).get("target_os") or hunt_target_os(hunt_row) or current_target_os()),
-                },
-                payload,
-                existing_state=saved_state,
-                update_current_pointer=False,
-            )
-        payload["saved_state_updated"] = False
-        return payload
-    return persist_state(
-        args.investigation_id,
-        profile,
-        request,
-        {
-            "hunt_id": hunt_id,
-            "hunt_description": str(hunt_row.get("hunt_description") or ""),
-            "target_os": str((saved_state or {}).get("target_os") or hunt_target_os(hunt_row) or current_target_os()),
-        },
-        payload,
-        existing_state=saved_state,
+
+def command_download_results(args: argparse.Namespace) -> dict[str, Any]:
+    return _command_hunt_results(
+        args,
+        command_name="download-results",
+        action="downloaded_hunt_results",
+        write_results=download_hunt_results,
+        action_payload=download_action_payload,
     )
 
 

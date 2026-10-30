@@ -9,20 +9,19 @@ import copy
 import csv
 import functools
 import gzip
-import hashlib
 import io
 import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 from vraptor.agent import diagnostics as agent_diagnostics
 from vraptor.analyze import limits as analysis_limits
 from vraptor.common import token_budget
-from vraptor.common.hashing import sha256_file
+from vraptor.common.clock import now_utc
+from vraptor.common.hashing import canonical_json, sha256_file, sha256_json
 from vraptor.agent.config import ResolvedAgentExecution
 from vraptor.agent.config import resolve_agent_execution
 from vraptor.agent.profiles import PROFILE_NAMES
@@ -225,22 +224,7 @@ NORMALIZATION_KINDS = {
 }
 
 
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stable_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=str,
-    )
-
-
-def sha256_value(value: Any) -> str:
-    return hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()
+stable_json = canonical_json
 
 
 def accounting_id_for(
@@ -250,7 +234,7 @@ def accounting_id_for(
     stack_id: str,
     values: list[Any],
 ) -> str:
-    return "accounting-" + sha256_value(
+    return "accounting-" + sha256_json(
         {
             "artifact": artifact,
             "scope": scope,
@@ -385,7 +369,7 @@ def autoruns_use_case(
                 ],
             },
             "reference": str(LOLBIN_REFERENCE_PATH),
-            "reference_hash": sha256_value(
+            "reference_hash": sha256_json(
                 load_json_object(LOLBIN_REFERENCE_PATH)
             ),
         }
@@ -568,7 +552,7 @@ def filter_identity(record: dict[str, Any]) -> str:
         "scope": dict(record.get("scope") or {}),
         "conditions": filter_conditions(record),
     }
-    return f"filter-{sha256_value(basis)[:16]}"
+    return f"filter-{sha256_json(basis)[:16]}"
 
 
 def filter_conditions(record: dict[str, Any]) -> list[dict[str, str]]:
@@ -755,7 +739,7 @@ def unprofiled_runtime_profile(artifact: str) -> dict[str, Any]:
             "stacks": {},
             "default_stack": "",
         },
-        "_profile_hash": sha256_value({"artifact": artifact, "fallback": True}),
+        "_profile_hash": sha256_json({"artifact": artifact, "fallback": True}),
     }
 
 
@@ -1476,7 +1460,7 @@ def review_queue_set_id(
         ),
         key=lambda item: str(item.get("review_id") or ""),
     )
-    return sha256_value(ordered)
+    return sha256_json(ordered)
 
 
 def review_queue_dimensions(
@@ -1867,7 +1851,7 @@ def signature_reduction(
 ) -> dict[str, Any]:
     normalized = [
         {
-            "signature": sha256_value(
+            "signature": sha256_json(
                 [
                     str(group.get(f"Pivot{index}") or "")
                     for index in range(1, dimension_count + 1)
@@ -2218,8 +2202,8 @@ def evidence_review_id(
     env: dict[str, str],
     rows: list[dict[str, Any]],
 ) -> tuple[str, str]:
-    evidence_hash = sha256_value(rows)
-    review_id = "review-" + sha256_value(
+    evidence_hash = sha256_json(rows)
+    review_id = "review-" + sha256_json(
         {
             "hunt_id": hunt_id,
             "artifact": artifact,
@@ -2265,7 +2249,7 @@ def review_item(
         "exhaustive": exhaustive,
         "evidence_hash": evidence_hash,
         "query": {
-            "query_hash": sha256_value({"vql": vql, "env": env}),
+            "query_hash": sha256_json({"vql": vql, "env": env}),
             **query_meta,
         },
         "rows": rows,
@@ -2513,7 +2497,7 @@ def compact_completed_scope_pages(artifact_state: dict[str, Any]) -> None:
     seen_scopes: set[str] = set()
     unique_scopes: list[dict[str, Any]] = []
     for scope in artifact_state.get("reviewed_scopes") or []:
-        scope_id = sha256_value(scope)
+        scope_id = sha256_json(scope)
         if scope_id in seen_scopes:
             continue
         seen_scopes.add(scope_id)
@@ -2668,7 +2652,7 @@ def apply_decisions(
                     "kind, and a concrete reason."
                 )
             candidate = {
-                "id": "normalization-" + sha256_value(
+                "id": "normalization-" + sha256_json(
                     {
                         "artifact": artifact,
                         "use_case": pending_use_case,
@@ -2709,7 +2693,7 @@ def apply_decisions(
                     "Drill-down requests require a concrete reason and a "
                     "deterministic signature-backed review."
                 )
-            drilldown_id = "drilldown-" + sha256_value(
+            drilldown_id = "drilldown-" + sha256_json(
                 {
                     "artifact": artifact,
                     "scope": review_match.get("scope") or {},
@@ -2999,7 +2983,7 @@ def apply_decisions(
                     pending.get("artifact_total") or pending.get("scope_row_count") or 0
                 )
                 artifact_state["completed_at_total"] = accounted_rows
-                accounting_id = "accounting-" + sha256_value(
+                accounting_id = "accounting-" + sha256_json(
                     {
                         "artifact": artifact,
                         "review_id": review_id,
@@ -3023,7 +3007,7 @@ def apply_decisions(
                 scope = dict(pending.get("scope") or {})
                 if scope:
                     artifact_state.setdefault("reviewed_scopes", []).append(scope)
-                    accounting_id = "accounting-" + sha256_value(
+                    accounting_id = "accounting-" + sha256_json(
                         {
                             "artifact": artifact,
                             "scope": scope,
@@ -3049,7 +3033,7 @@ def apply_decisions(
                     artifact_state.setdefault("reviewed_matches", []).append(
                         review_match
                     )
-                    accounting_id = "accounting-" + sha256_value(
+                    accounting_id = "accounting-" + sha256_json(
                         {
                             "artifact": artifact,
                             "review_match": review_match,
@@ -3173,7 +3157,7 @@ def append_query_ledger(
     env: dict[str, str],
     row_count: int,
 ) -> str:
-    query_hash = sha256_value({"vql": vql, "env": env})
+    query_hash = sha256_json({"vql": vql, "env": env})
     state["query_ledger"].append(
         {
             "at": now_utc(),
@@ -3290,7 +3274,7 @@ def analysis_input_hash(
         "pattern",
         "enabled",
     )
-    return sha256_value(
+    return sha256_json(
         {
             "profile_hash": profile_hash,
             "autoruns_canonicalization_version": autoruns.CANONICALIZATION_VERSION,
@@ -3316,7 +3300,7 @@ def analysis_input_hash(
                if stack_max_total_rows is not None else {}),
             "stack_field_preferences": list(stack_field_preferences or []),
             "stack_field_guidance_sha256": (
-                sha256_value(stack_field_guidance)
+                sha256_json(stack_field_guidance)
                 if stack_field_guidance
                 else ""
             ),
@@ -3592,7 +3576,7 @@ def review_autoruns_suspicious_context_streaming(
             "autoruns_drilldown_validated" if not missing else "autoruns_drilldown_failed",
             level="error" if missing else "info", stage="autoruns_drilldown",
             error_code="autoruns_missing_identity" if missing else "none",
-            query_sha256=sha256_value({"vql": query, "env": env}),
+            query_sha256=sha256_json({"vql": query, "env": env}),
             purpose="autoruns-suspicious-drilldown",
             batch=batch_number,
             selected_identities=len(stats), matched_identities=len(stats) - len(missing),
@@ -3601,7 +3585,7 @@ def review_autoruns_suspicious_context_streaming(
         for identity in missing[:10]:
             operation_log.emit(
                 "autoruns_missing_identity", level="debug", stage="autoruns_drilldown",
-                identity_reference=sha256_value(identity),
+                identity_reference=sha256_json(identity),
                 omitted_identities=max(0, len(missing) - 10),
             )
         if missing:
@@ -3624,7 +3608,7 @@ def review_autoruns_suspicious_context_streaming(
             if len(reasons) == 1 and "" not in reasons:
                 contextual_exclusions.append(
                     {
-                        "identity_sha256": sha256_value(identity),
+                        "identity_sha256": sha256_json(identity),
                         "reason": next(iter(reasons)),
                         "row_count": int(item["row_count"]),
                     }
@@ -3657,7 +3641,7 @@ def review_autoruns_suspicious_context_streaming(
             ]
             all_items.append(
                 {
-                    "identity_sha256": sha256_value(identity),
+                    "identity_sha256": sha256_json(identity),
                     "ImagePath": suspicious["ImagePath"],
                     "LaunchString": suspicious["LaunchString"],
                     "Signer": suspicious["Signer"],
@@ -3710,7 +3694,7 @@ def sync_autoruns_finding(
     """Replace the deterministic aggregate finding for one Autoruns mode."""
 
     mode = str(use_case)
-    finding_id = "autoruns:" + sha256_value(
+    finding_id = "autoruns:" + sha256_json(
         {"artifact": artifact, "mode": mode}
     )[:16]
     state["findings"] = [
@@ -3826,7 +3810,7 @@ def analyze_autoruns_streaming_workflow(
         analysis_scope_where,
         source=source,
     )
-    query_hash = sha256_value({"vql": query, "env": analysis_scope_env})
+    query_hash = sha256_json({"vql": query, "env": analysis_scope_env})
     workflow = {
         "version": AUTORUNS_STREAMING_WORKFLOW_VERSION,
         "mode": use_case,
@@ -4040,7 +4024,7 @@ def analyze_generic_streaming_stack_workflow(
         )
         discovery_metadata = {
             "sample_row_count": len(sample),
-            "sample_query_hash": sha256_value(
+            "sample_query_hash": sha256_json(
                 {"vql": discovery_query, "env": discovery_env}
             ),
             "observed_statistics_hash": "",
@@ -4053,7 +4037,7 @@ def analyze_generic_streaming_stack_workflow(
             "rejected_recommendations": [],
             "requested_field_preferences": list(stack_field_preferences),
             "field_guidance_hash": (
-                sha256_value(stack_field_guidance)
+                sha256_json(stack_field_guidance)
                 if stack_field_guidance
                 else ""
             ),
@@ -4123,7 +4107,7 @@ def analyze_generic_streaming_stack_workflow(
         signature_dimensions = [
             quote_vql_field_identifier(field) for field in logical_dimensions
         ]
-        runtime_hash = sha256_value(
+        runtime_hash = sha256_json(
             {"scope": scope_aliases, "signatures": logical_dimensions}
         )[:12]
         scope_id = "runtime-discovered-scope" if scope_aliases else "global"
@@ -4281,7 +4265,7 @@ def analyze_generic_streaming_stack_workflow(
                 artifact=artifact,
                 purpose=(
                     f"streaming-stack:{signature_id}:"
-                    f"{sha256_value(scope)[:8]}"
+                    f"{sha256_json(scope)[:8]}"
                 ),
                 vql=group_query,
                 env=branch_env,
@@ -4310,7 +4294,7 @@ def analyze_generic_streaming_stack_workflow(
     )
     aggregate_env = dict(remaining_env)
     if dynamic:
-        discovery_metadata["generated_aggregate_query_hash"] = sha256_value(
+        discovery_metadata["generated_aggregate_query_hash"] = sha256_json(
             {"vql": aggregate_query, "env": aggregate_env}
         )
 
@@ -5654,7 +5638,7 @@ def analyze_artifact(
             "rejected_recommendations": [],
             "requested_field_preferences": list(stack_field_preferences),
             "field_guidance_hash": (
-                sha256_value(stack_field_guidance)
+                sha256_json(stack_field_guidance)
                 if stack_field_guidance
                 else ""
             ),
@@ -5886,7 +5870,7 @@ def analyze_artifact(
             record_budget_stop(
                 artifact_state,
                 meta,
-                purpose=f"scope:{sha256_value(scope)[:8]}",
+                purpose=f"scope:{sha256_json(scope)[:8]}",
             )
             if not query_emits_review(meta):
                 break
@@ -5941,7 +5925,7 @@ def analyze_artifact(
             record_budget_stop(
                 artifact_state,
                 meta,
-                purpose=f"scope-sample:{sha256_value(scope)[:8]}",
+                purpose=f"scope-sample:{sha256_json(scope)[:8]}",
             )
             if not query_emits_review(meta):
                 break
@@ -6003,7 +5987,7 @@ def analyze_artifact(
         append_query_ledger(
             state,
             artifact=artifact,
-            purpose=f"signature:{signature_id}:{sha256_value(scope)[:8]}",
+            purpose=f"signature:{signature_id}:{sha256_json(scope)[:8]}",
             vql=signature_query,
             env=branch_env,
             row_count=len(signature_groups),
@@ -6104,7 +6088,7 @@ def analyze_artifact(
                 artifact=artifact,
                 purpose=(
                     f"family-signature:{family_signature_id}:"
-                    f"{sha256_value(scope)[:8]}"
+                    f"{sha256_json(scope)[:8]}"
                 ),
                 vql=family_query,
                 env=branch_env,
@@ -6158,7 +6142,7 @@ def analyze_artifact(
                     artifact=artifact,
                     purpose=(
                         f"normalized-variants:{family_signature_id}:"
-                        f"{sha256_value(scope)[:8]}"
+                        f"{sha256_json(scope)[:8]}"
                     ),
                     vql=variant_pair_query,
                     env=branch_env,
@@ -6244,7 +6228,7 @@ def analyze_artifact(
                             "max_item_tokens": max_review_tokens,
                         },
                         purpose=(
-                            f"normalized-stack:{sha256_value(scope)[:8]}:"
+                            f"normalized-stack:{sha256_json(scope)[:8]}:"
                             f"{family_index}"
                         ),
                     )
@@ -6378,7 +6362,7 @@ def analyze_artifact(
                 stack_group_budget -= 1
                 token_budget_remaining -= aggregate_tokens
             if page_review_ids:
-                page_id = "scope-page-" + sha256_value(
+                page_id = "scope-page-" + sha256_json(
                     {
                         "artifact": artifact,
                         "scope": scope,
@@ -6409,7 +6393,7 @@ def analyze_artifact(
                 record_budget_stop(
                     artifact_state,
                     family_meta,
-                    purpose=f"normalized-stack:{sha256_value(scope)[:8]}",
+                    purpose=f"normalized-stack:{sha256_json(scope)[:8]}",
                 )
                 token_budget_remaining = 0
             continue
@@ -6452,7 +6436,7 @@ def analyze_artifact(
                 artifact_state,
                 meta,
                 purpose=(
-                    f"exact-signature:{sha256_value(scope)[:8]}:"
+                    f"exact-signature:{sha256_json(scope)[:8]}:"
                     f"{signature_index}"
                 ),
             )
@@ -7612,7 +7596,7 @@ def write_suspicious_use_case_outputs(
         hosts = unique_dicts(
             [
                 {
-                    "id": sha256_value(
+                    "id": sha256_json(
                         {
                             "Fqdn": str(row.get("Fqdn") or ""),
                             "ClientId": str(row.get("ClientId") or ""),
@@ -7630,7 +7614,7 @@ def write_suspicious_use_case_outputs(
             host.pop("id", None)
         grouped.setdefault(output_name, []).append(
             {
-                "id": "suspicious-" + sha256_value(
+                "id": "suspicious-" + sha256_json(
                     {
                         "artifact": item.get("artifact"),
                         "scope": item.get("scope"),
@@ -8266,7 +8250,7 @@ def analyze_live_hunt(
             "lane": use_case or "specialized_stack",
             "artifact_diagnostics": [
                 {
-                    "artifact_sha256": sha256_value(str(artifact)),
+                    "artifact_sha256": sha256_json(str(artifact)),
                     "status": artifact_state.get("status"),
                     "current_total": int(artifact_state.get("current_total") or 0),
                     "remaining_total": int(artifact_state.get("remaining_total") or 0),

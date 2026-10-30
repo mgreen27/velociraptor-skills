@@ -29,8 +29,8 @@ from vraptor.agent.runtime import ProgressCallback
 from vraptor.agent.runtime import ProviderCapabilities
 from vraptor.agent.runtime import ProviderResponse
 from vraptor.agent.runtime import TimeoutPolicy
-from vraptor.agent.runtime import now_utc
 from vraptor.agent.runtime import validate_prompt_cache_prefix
+from vraptor.common.clock import now_utc
 
 
 def _get(value: object, name: str, default: Any = None) -> Any:

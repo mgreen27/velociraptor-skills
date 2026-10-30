@@ -31,6 +31,7 @@ from vraptor.agent.sources import (
     read_config,
     resolve_config_path,
 )
+from vraptor.common.atomic_io import write_bytes_atomic
 from vraptor.paths import repository_environment
 
 
@@ -391,20 +392,6 @@ def _toml(data: dict[str, Any]) -> str:
                 lines.append(line)
             lines.append("")
     return "\n".join(lines)
-
-
-def _atomic_write(path: Path, content: bytes) -> None:
-    """Replace one file with an owner-only, fully written copy."""
-    handle, temporary = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def _profile_type(profile: dict[str, Any], connections: dict[str, Any]) -> str:
@@ -1132,8 +1119,8 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     backup = ""
     if path.exists():
         backup = str(path.with_name(path.name + ".bak"))
-        _atomic_write(Path(backup), path.read_bytes())
-    _atomic_write(path, content)
+        write_bytes_atomic(Path(backup), path.read_bytes())
+    write_bytes_atomic(path, content)
     authentication = {"authentication": "not_checked"}
     if args.from_harness == "claude_code":
         _heading(

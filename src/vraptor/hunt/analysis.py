@@ -8,7 +8,6 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Iterator
@@ -24,10 +23,12 @@ from vraptor.autoruns import pipeline as autoruns
 from vraptor.analyze import records as evidence_records
 from vraptor.analyze import planning as review_planning
 
+from vraptor import case_layout
 from vraptor.paths import add_case_root_arg
 from vraptor.paths import default_case_root
 from vraptor.paths import load_repo_env
 from vraptor.common import token_budget
+from vraptor.common.clock import now_utc
 from vraptor.common.sequences import unique_ordered
 
 load_repo_env(REPO_ROOT)
@@ -114,10 +115,6 @@ def configure_csv_field_limit() -> None:
 
 
 configure_csv_field_limit()
-
-
-def now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def read_json(path: Path, description: str = "JSON file") -> Any:
@@ -226,7 +223,7 @@ def artifact_matches_selector(entry: dict[str, Any], selectors: list[str]) -> bo
 
 
 def find_saved_state_by_hunt_id(case_root: Path, investigation_id: str, hunt_id: str) -> Path | None:
-    state_path = case_root / investigation_id / "hunts" / hunt_id / "state.json"
+    state_path = case_layout.hunt_dir(case_root, investigation_id, hunt_id) / "state.json"
     return state_path if state_path.exists() else None
 
 

@@ -13,7 +13,6 @@ from pathlib import Path
 
 from vraptor.agent.config import analyst_execution_identity
 from vraptor.agent.factory import create_agent_runner
-from vraptor.agent.runtime import now_utc
 from vraptor.analyze import (
     checkpoints,
     cli_output,
@@ -24,6 +23,7 @@ from vraptor.analyze import (
     synthesis,
 )
 from vraptor.common import atomic_io
+from vraptor.common.clock import now_utc
 from vraptor.common.hashing import sha256_file
 from vraptor.logging import operations
 from vraptor.paths import add_case_root_arg, resolve_case_root
@@ -67,14 +67,7 @@ def resolve_checkpoint(args) -> Path:
 def load_accepted(path: Path) -> tuple[dict, list[dict], dict]:
     saved = json.loads(path.read_text())
     if "artifact_summaries" in saved:
-        expected = checkpoints.canonical_hash(
-            {
-                k: v
-                for k, v in saved.items()
-                if k not in {"checkpoint_fingerprint", "completed_at"}
-            }
-        )
-        if expected != saved.get("checkpoint_fingerprint"):
+        if not checkpoints.request_checkpoint_valid(saved):
             raise ValueError("Saved request checkpoint failed integrity validation")
         artifacts, plans = [], []
         for item in saved["artifact_summaries"]:
@@ -331,13 +324,7 @@ async def summarize(
             artifacts, question=question, scope=plan["scope_type"], plan=plan
         ))
         if "checkpoint_fingerprint" in saved:
-            saved["checkpoint_fingerprint"] = checkpoints.canonical_hash(
-                {
-                    k: v
-                    for k, v in saved.items()
-                    if k not in {"checkpoint_fingerprint", "completed_at"}
-                }
-            )
+            saved["checkpoint_fingerprint"] = checkpoints.request_checkpoint_fingerprint(saved)
         atomic_io.write_json_atomic(path, saved, sort_keys=True)
         report = publish_summary(result, model_calls=diagnostics["model_calls"])
         persist_diagnostics(result["status"], completed=True)

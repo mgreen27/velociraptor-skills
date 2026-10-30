@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable
 
 from vraptor.analyze import limits as analysis_limits
 from vraptor.common import token_budget
+from vraptor.common.clock import now_utc
 from vraptor.agent.config import ResolvedAgentExecution
 from vraptor.agent.config import analyst_execution_metadata
 from vraptor.agent.factory import create_agent_runner
@@ -21,7 +22,6 @@ from vraptor.agent.runtime import AgentRequest
 from vraptor.agent.runtime import AgentResult
 from vraptor.agent.runtime import AgentRuntimeLimits
 from vraptor.agent.runtime import is_output_limit_failure
-from vraptor.agent.runtime import now_utc
 from vraptor.agent.runtime import run_item_pool
 from vraptor.analyze import cli_output as analysis_cli_output
 from vraptor.analyze import summary as analysis_summary

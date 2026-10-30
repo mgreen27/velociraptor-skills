@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+from vraptor.common.hashing import sha256_json
 
 MODES = ("none", "full")
 VERSION = 1
@@ -87,10 +88,7 @@ def mode(value: str = "full") -> str:
     return value
 
 
-def fingerprint(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
+fingerprint = sha256_json
 
 
 def preliminary(

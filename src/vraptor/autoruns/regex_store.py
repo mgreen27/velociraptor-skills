@@ -1,7 +1,7 @@
 """Reviewed regex-only GoldenDB storage, import and backed-up migration."""
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 import fcntl
 import json
 import hashlib
@@ -32,6 +32,17 @@ CREATE TABLE autoruns_regex_rules(
     PRIMARY KEY(category_regex,image_path_regex,launch_string_regex,signer_regex)
 ) WITHOUT ROWID;
 """
+
+
+@contextmanager
+def golden_db_lock(database):
+    """Hold the exclusive sibling lock file shared by every GoldenDB writer."""
+    with database.with_name("." + database.name + ".lock").open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def literal_pattern(value):
@@ -201,12 +212,8 @@ def _migrate_locked(source, output, *, backup_dir, exclude_exact=False):
 
 def migrate(source, output, *, backup_dir, exclude_exact=False):
     source = Path(source).expanduser().resolve()
-    with source.with_name("."+source.name+".lock").open("a+b") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            return _migrate_locked(source, output, backup_dir=backup_dir, exclude_exact=exclude_exact)
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with golden_db_lock(source):
+        return _migrate_locked(source, output, backup_dir=backup_dir, exclude_exact=exclude_exact)
 
 
 def import_rules(target, input_path, *, backup_dir, dry_run=False):
@@ -232,36 +239,32 @@ def import_rules(target, input_path, *, backup_dir, dry_run=False):
         for field in FIELDS: autoruns_regex.compile_pattern(row[field])
         new.append((".", *(autoruns_regex.full_pattern(row[f]) for f in FIELDS[1:]),
             row["Notes"], stamp))
-    with target.with_name("."+target.name+".lock").open("a+b") as lock:
-        fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+    with golden_db_lock(target):
+        if load(target)["metadata"]["schema_version"] == "10":
+            raise RuntimeError("Schema-10 GoldenDB imports require CSV input.")
+        before=target.read_bytes()
+        fd,name=tempfile.mkstemp(prefix=".regex-import-",suffix=".sqlite",dir=target.parent)
+        os.close(fd); temp=Path(name)
         try:
-            if load(target)["metadata"]["schema_version"] == "10":
-                raise RuntimeError("Schema-10 GoldenDB imports require CSV input.")
-            before=target.read_bytes()
-            fd,name=tempfile.mkstemp(prefix=".regex-import-",suffix=".sqlite",dir=target.parent)
-            os.close(fd); temp=Path(name)
-            try:
-                temp.write_bytes(before)
-                with closing(sqlite3.connect(temp)) as db:
-                    initial=db.total_changes
-                    db.executemany("INSERT OR IGNORE INTO autoruns_regex_rules VALUES (?,?,?,?,?,?)",new)
-                    added=db.total_changes-initial
-                    count=db.execute("SELECT count(*) FROM autoruns_regex_rules").fetchone()[0]
-                    db.execute("UPDATE metadata SET value=? WHERE key='rule_count'",(str(count),))
-                    db.commit()
-                checked=report(temp)
-                result=dict(database=str(target),added_rules=added,rule_count=count,dry_run=dry_run,remote_uploaded=False)
-                if dry_run or not added: return result
-                directory=Path(backup_dir).expanduser().resolve();directory.mkdir(parents=True,exist_ok=True)
-                backup=directory/(target.name+"."+hashlib.sha256(before).hexdigest()+".bak")
-                if not backup.exists():
-                    with backup.open("xb") as f: f.write(before)
-                    backup.chmod(0o600)
-                if target.read_bytes()!=before or backup.read_bytes()!=before:
-                    raise RuntimeError("Regex import source/backup changed.")
-                os.replace(temp,target)
-                return {**result,"backup":str(backup),"sha256":checked["sha256"]}
-            finally:
-                temp.unlink(missing_ok=True)
+            temp.write_bytes(before)
+            with closing(sqlite3.connect(temp)) as db:
+                initial=db.total_changes
+                db.executemany("INSERT OR IGNORE INTO autoruns_regex_rules VALUES (?,?,?,?,?,?)",new)
+                added=db.total_changes-initial
+                count=db.execute("SELECT count(*) FROM autoruns_regex_rules").fetchone()[0]
+                db.execute("UPDATE metadata SET value=? WHERE key='rule_count'",(str(count),))
+                db.commit()
+            checked=report(temp)
+            result=dict(database=str(target),added_rules=added,rule_count=count,dry_run=dry_run,remote_uploaded=False)
+            if dry_run or not added: return result
+            directory=Path(backup_dir).expanduser().resolve();directory.mkdir(parents=True,exist_ok=True)
+            backup=directory/(target.name+"."+hashlib.sha256(before).hexdigest()+".bak")
+            if not backup.exists():
+                with backup.open("xb") as f: f.write(before)
+                backup.chmod(0o600)
+            if target.read_bytes()!=before or backup.read_bytes()!=before:
+                raise RuntimeError("Regex import source/backup changed.")
+            os.replace(temp,target)
+            return {**result,"backup":str(backup),"sha256":checked["sha256"]}
         finally:
-            fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
+            temp.unlink(missing_ok=True)

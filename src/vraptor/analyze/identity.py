@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any, Iterable
+
+from vraptor.common.hashing import canonical_json, sha256_json
 
 
 RUN_IDENTITY_SCHEMA_VERSION = 1
@@ -19,20 +20,6 @@ CLASSIFICATION_RANK = {
     FAILED_OR_CANCELLED: 10,
     UNKNOWN: 0,
 }
-
-
-def stable_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=str,
-    )
-
-
-def sha256_value(value: Any) -> str:
-    return hashlib.sha256(stable_json(value).encode("utf-8")).hexdigest()
 
 
 def canonical_spec(spec: Any) -> dict[str, Any]:
@@ -72,7 +59,7 @@ def canonical_specs(specs: Iterable[Any]) -> list[dict[str, Any]]:
         normalized,
         key=lambda item: (
             item["artifact"],
-            stable_json(item["env"]),
+            canonical_json(item["env"]),
             int(item["timeout_seconds"] or 0),
         ),
     )
@@ -88,13 +75,13 @@ def build_run_identity(
     identity = {
         "schema_version": RUN_IDENTITY_SCHEMA_VERSION,
         "source_mode": str(source_mode),
-        "target": json.loads(stable_json(target)),
+        "target": json.loads(canonical_json(target)),
         "specs": canonical_specs(specs),
         "source_versions": dict(sorted((source_versions or {}).items())),
     }
     return {
         "identity": identity,
-        "sha256": sha256_value(identity),
+        "sha256": sha256_json(identity),
     }
 
 

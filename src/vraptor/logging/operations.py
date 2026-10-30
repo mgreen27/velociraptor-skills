@@ -1334,7 +1334,7 @@ def user_log_directory() -> Path:
     return root / "vraptor" / "logs"
 
 
-def _cli_option(args: list[str], *names: str) -> str:
+def cli_option(args: list[str], *names: str) -> str:
     for index, arg in enumerate(args):
         for name in names:
             if arg == name and index + 1 < len(args):
@@ -1381,15 +1381,15 @@ def bind_cli_destination(args: list[str]) -> Path | None:
     if args[:1] in (["query"], ["clients"]):
         # Instance-only commands accept --id as a server-profile alias, not a case.
         return logger.bind_path(user_log_directory() / LOG_FILENAME)
-    engagement_id = _cli_option(args, "--id", "--investigation-id", "--engagement-id")
+    engagement_id = cli_option(args, "--id", "--investigation-id", "--engagement-id")
     if engagement_id and SAFE_ENGAGEMENT_RE.fullmatch(engagement_id) and engagement_id not in {".", ".."}:
         from vraptor import settings
         from vraptor.paths import resolve_case_root
         from vraptor.resources import repository_root
 
-        case_root = _cli_option(args, "--case-root") or settings.active_value("case_root")
+        case_root = cli_option(args, "--case-root") or settings.active_value("case_root")
         return logger.bind_case(resolve_case_root(case_root, repository_root()), engagement_id)
-    checkpoint = _cli_option(args, "--checkpoint")
+    checkpoint = cli_option(args, "--checkpoint")
     case = _checkpoint_case(checkpoint) if checkpoint else None
     if case is not None:
         return logger.bind_case(case.parent, case.name)
