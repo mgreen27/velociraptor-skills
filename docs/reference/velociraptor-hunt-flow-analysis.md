@@ -485,6 +485,11 @@ provides a suitable stable event identity.
 The workflow is failure-closed:
 
 - any rejected or failed transient analyst chunk prevents publication;
+- a chunk whose last correction still fails validation gets one AI repair call
+  in the same run; an accepted repair is published with an `accepted after AI
+  repair` limitation, recorded and resolved in `hunt-failed-chunks.json`, and
+  listed in the run record's `repaired_chunk_ids`
+  ([repair contract](analysis-recovery.md#repair-a-chunk-after-its-correction-attempts));
 - failed chunk evidence and model output are not written to state;
 - each chunk that fails every attempt is recorded value-free in
   `hunt-failed-chunks.json` (chunk ID, artifact, row and reference range, input

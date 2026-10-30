@@ -714,7 +714,7 @@ def render_flow_freshness(flows: Iterable[Mapping[str, Any]]) -> list[str]:
 
 
 def failed_chunk_line(chunk: Mapping[str, Any]) -> str:
-    """One review line for a chunk that exhausted its attempts or was waived."""
+    """One review line for a chunk that exhausted its attempts, was repaired or was waived."""
     position = (
         f" chunk {int(chunk['task_chunk_index']) + 1}/{chunk['task_chunk_count']}"
         if "task_chunk_index" in chunk and "task_chunk_count" in chunk
@@ -733,10 +733,37 @@ def failed_chunk_line(chunk: Mapping[str, Any]) -> str:
     where = f"`{chunk.get('artifact') or 'unknown'}`{position}{rows}{refs}"
     if chunk.get("status") == "waived":
         return f"{where} waived by operator, not analysed: {chunk.get('reason', '')}"
+    repair = dict(chunk.get("repair") or {})
+    causes = ", ".join(
+        f"{item['cause']}" + (f" at {item['location']}" if item.get("location", "-") != "-" else "")
+        for item in repair.get("causes") or []
+    )
+    key = f" Key `{chunk['key']}`." if chunk.get("key") else ""
+    if repair.get("outcome") == "repaired":
+        before, after = int(repair.get("findings_before") or 0), int(repair.get("findings_after") or 0)
+        drop = (
+            f" The rejected answers had {before} finding(s); the accepted answer has {after}."
+            if after < before else ""
+        )
+        return (
+            f"{where} accepted after AI repair ({causes or 'no cause given'}); "
+            f"verify these rows in Velociraptor.{drop}{key}"
+        )
     codes = ", ".join(str(code) for code in chunk.get("defect_codes") or []) or "no defect codes"
+    skipped = {
+        "repair_limit_reached": "per-run repair limit reached",
+        "repair_prompt_too_large": "the repair prompt would exceed the input limit",
+    }
+    tried = (
+        f" An AI repair call also failed ({causes or repair.get('category') or 'no cause given'})."
+        if repair.get("outcome") in {"failed", "unrepairable"}
+        else f" AI repair was skipped: {skipped[repair['reason']]}."
+        if repair.get("reason") in skipped
+        else ""
+    )
     return (
         f"{where} failed after {chunk.get('attempts', 0)} attempts: "
-        f"{chunk.get('category', 'analysis_error')}; {codes}. Key `{chunk.get('key', '')}`."
+        f"{chunk.get('category', 'analysis_error')}; {codes}.{tried} Key `{chunk.get('key', '')}`."
     )
 
 
@@ -778,6 +805,7 @@ def render_chat_summary(
         lines.extend(render_flow_freshness(flow_metadata))
     troubleshooting = dict(payload.get("troubleshooting") or {})
     failed_chunks = list(troubleshooting.get("failed_chunks") or [])
+    repaired_chunks = list(troubleshooting.get("repaired_chunks") or [])
     if troubleshooting.get("failed_stages"):
         lines.append(f"- Troubleshooting: `{troubleshooting.get('diagnostics_file', '')}`")
         stages = [
@@ -788,9 +816,15 @@ def render_chat_summary(
             last = (item.get("attempt_history") or [{}])[-1]
             codes = ", ".join(str(d.get("code") or "") for d in last.get("defects") or [])
             lines.append(f"- Failed `{item.get('stage')}` / `{item.get('task_id')}` after {item.get('attempts', 0)} attempts: {last.get('category', item.get('category', 'analysis_error'))}; {codes or last.get('message', item.get('message', 'See diagnostics.'))}")
-    if failed_chunks:
+    if failed_chunks or repaired_chunks:
         lines.append(f"- Failed chunk record: `{troubleshooting.get('failed_chunks_file', '')}`")
-        lines.extend(f"- {failed_chunk_line(chunk)}" for chunk in failed_chunks[:10])
+        # Lines already listed under Limitations are not repeated here.
+        listed = {str(value).strip() for value in payload.get("limitations") or []}
+        lines.extend(
+            f"- {line}"
+            for line in [failed_chunk_line(chunk) for chunk in [*failed_chunks, *repaired_chunks][:10]]
+            if line not in listed
+        )
         if any(chunk.get("status") == "failed" for chunk in failed_chunks):
             lines.append(
                 "- After review, retry with the resume command below, or accept a gap by "
@@ -1134,8 +1168,12 @@ def render_artifact_report(result: Mapping[str, Any]) -> str:
         f"- Review status: `{result.get('status', 'unknown')}`",
         f"- Review coverage: {int(coverage.get('reviewed_rows') or 0)}/{int(coverage.get('planned_rows') or 0)} exposed rows",
         *(
-            [f"- Chunk coverage: {int(coverage.get('accepted_chunks') or 0)}/{int(coverage['planned_chunks'])} chunks accepted"]
+            [
+                f"- Chunk coverage: {int(coverage.get('accepted_chunks') or 0)}/{int(coverage['planned_chunks'])} chunks accepted"
+                + (f" ({int(coverage['repaired_chunks'])} after AI repair)" if coverage.get("repaired_chunks") else "")
+            ]
             if int(coverage.get("planned_chunks") or 0) > int(coverage.get("accepted_chunks") or 0)
+            or coverage.get("repaired_chunks")
             else []
         ),
         f"- Collection coverage: `{dict(result.get('collection_coverage') or {}).get('status', 'not_assessed')}`; flow `{dict(result.get('collection_coverage') or {}).get('flow_state', 'UNKNOWN')}`",

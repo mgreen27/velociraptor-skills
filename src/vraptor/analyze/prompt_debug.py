@@ -122,7 +122,8 @@ class PromptDump:
     ) -> None:
         with self._lock:
             record = self.records[index]
-            if not 1 <= attempt <= MAX_CORRECTION_ATTEMPTS + 1 or any(
+            # One first attempt, the correction ceiling and one repair call.
+            if not 1 <= attempt <= MAX_CORRECTION_ATTEMPTS + 2 or any(
                 item["attempt"] == attempt for item in record["attempts"]
             ):
                 raise ValueError(

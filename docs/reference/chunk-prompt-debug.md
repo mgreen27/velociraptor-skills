@@ -77,8 +77,9 @@ succeeded.
   DetectRaptor chunks, plus returned responses and validation-correction retries
   for those captured chunks. It excludes synthesis, final-review, specialized
   Autoruns and generic stack-review prompts/responses.
-- Each selected chunk can retain up to two analysis attempts, without consuming
-  another chunk slot. Provider-internal transport retries, token streams and
+- Each selected chunk retains every analysis attempt: the first, each
+  validation correction and the repair call (repair prompts are marked
+  `REPAIR REVIEW`), without consuming another chunk slot. Provider-internal transport retries, token streams and
   raw provider error bodies are not captured; the runner's returned text is.
 - Host `--skip-ai` and `--plan-only` explicitly render up to N prepared chunks
   when this flag is supplied. Planning still reads the selected evidence and

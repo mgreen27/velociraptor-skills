@@ -52,6 +52,7 @@ from vraptor.analyze import coordinator as flow_analysis_coordinator
 from vraptor.analyze import checkpoints as host_analysis_state
 from vraptor.collect import layout
 from vraptor.logging import operations as operation_log
+from vraptor.analyze import chunk_repair
 from vraptor.analyze import recovery
 from vraptor.api import VeloApiClient
 from vraptor.api import resolve_org_id
@@ -190,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     analysis_time_scope.add_arguments(parser)
     analysis_cli_arguments.add_skip_ai_argument(parser)
     analysis_cli_arguments.add_prompt_debug_argument(parser)
+    analysis_cli_arguments.add_chunk_repair_argument(parser)
     analysis_cli_arguments.add_query_timeout_argument(parser)
     model_options.add_arguments(parser)
     parser.add_argument(
@@ -521,6 +523,12 @@ def resume_analysis_command(
         resume_argv.extend(["--time-field", str(field)])
     if getattr(args, "no_autoruns_golden", False):
         resume_argv.append("--no-autoruns-golden")
+    # Model and budget options are part of the cache identity; dropping them would re-review accepted chunks.
+    for option in (*model_options.ROUTE_FIELDS, *model_options.BUDGET_FIELDS):
+        if getattr(args, option, None) is not None:
+            resume_argv.extend(["--" + option.replace("_", "-"), str(getattr(args, option))])
+    if getattr(args, "chunk_repair_limit", None) is not None:
+        resume_argv.extend(["--chunk-repair-limit", str(args.chunk_repair_limit)])
     if retry_failed:
         resume_argv.append("--retry-failed")
     return shlex.join(resume_argv)
@@ -1355,20 +1363,47 @@ async def _execute_incremental_analysis(
     chunk_counts: dict[str, dict[str, int]] = {}
     retry_command = resume_analysis_command(args, initial_payload, retry_failed=True)
 
+    repaired_keys: list[str] = []
+
+    def chunk_evidence(
+        key: str, source_aliases: dict[str, dict[str, Any]], task: Any,
+        record: dict[str, Any], prompts: list[str] | None,
+    ) -> dict[str, Any] | None:
+        if prompts is None:
+            return None
+        aliases = set(task.metadata.get("source_aliases") or [])
+        return prompt_debug.capture_failed_chunk(
+            key=key,
+            prompts=prompts,
+            record=record,
+            source_ids=[
+                source_id
+                for source_id, entry in source_aliases.items()
+                if str(dict(entry).get("alias") or "") in aliases
+            ],
+        )
+
+    def record_repaired_chunk(
+        name: str, source_aliases: dict[str, dict[str, Any]], task: Any,
+        record: dict[str, Any], prompts: list[str],
+    ) -> None:
+        key = f"{name}:{task.task_id}"
+        repaired_keys.append(key)
+        chunk_ledger.resolve(
+            key, repair=record.get("repair"),
+            evidence=chunk_evidence(key, source_aliases, task, record, prompts),
+        )
+
     def record_failed_chunk(
         name: str,
         flow_id: str,
         source_aliases: dict[str, dict[str, Any]],
         task: Any,
         record: dict[str, Any],
-        prompts: list[str],
+        prompts: list[str] | None,
     ) -> None:
+        """``prompts`` is None for the record written before a repair call."""
         key = f"{name}:{task.task_id}"
-        inputs = dict(record.get("inputs") or {})
-        aliases = {
-            str(inputs.get(ref) or "").split("-R", 1)[0]
-            for ref in ("first_reference", "last_reference")
-        }
         chunk_ledger.record_failure(
             key,
             recovery.task_diagnostics(record),
@@ -1383,16 +1418,7 @@ async def _execute_incremental_analysis(
                     ["--waive-failed-chunk", key, "--waive-reason", "REASON"]
                 ),
             },
-            evidence=prompt_debug.capture_failed_chunk(
-                key=key,
-                prompts=prompts,
-                record=record,
-                source_ids=[
-                    source_id
-                    for source_id, entry in source_aliases.items()
-                    if str(dict(entry).get("alias") or "") in aliases
-                ],
-            ),
+            evidence=chunk_evidence(key, source_aliases, task, record, prompts),
         )
 
     def save_diagnostics(run: dict[str, Any], artifact: str) -> None:
@@ -1628,6 +1654,13 @@ async def _execute_incremental_analysis(
                 chunk_failed=lambda task, record, prompts: record_failed_chunk(
                     name, str(item.get("flow_id") or ""),
                     dict(artifact_plan.get("source_aliases") or {}), task, record, prompts,
+                ),
+                chunk_exhausted=lambda task, record: record_failed_chunk(
+                    name, str(item.get("flow_id") or ""),
+                    dict(artifact_plan.get("source_aliases") or {}), task, record, None,
+                ),
+                chunk_repaired=lambda task, record, prompts: record_repaired_chunk(
+                    name, dict(artifact_plan.get("source_aliases") or {}), task, record, prompts,
                 ),
                 chunk_waiver=lambda task: chunk_ledger.waiver(
                     f"{name}:{task.task_id}", recovery.fingerprint(task.prompt),
@@ -2103,8 +2136,13 @@ async def _execute_incremental_analysis(
                     recovery.failed_chunk_summary(key, entry)
                     for key, entry in chunk_ledger.entries("failed", "waived").items()
                 ][:50],
+                "repaired_chunks": [
+                    recovery.failed_chunk_summary(key, entry)
+                    for key, entry in chunk_ledger.entries("resolved").items()
+                    if key in repaired_keys
+                ][:50],
             }
-            if chunk_ledger.entries("failed", "waived")
+            if chunk_ledger.entries("failed", "waived") or repaired_keys
             else {}
         ),
         "resume_command": resume_analysis_command(args, initial_payload, retry_failed=True),
@@ -2698,7 +2736,9 @@ async def async_main(argv: list[str] | None = None, *, existing_only: bool = Fal
                 context.case_root / context.engagement_id,
                 global_args.debug_chunk_prompts,
                 keep_failed=global_args.keep_failed_chunk_evidence,
-            ) as prompt_dump:
+            ) as prompt_dump, chunk_repair.session(
+                chunk_repair.resolve_limit(getattr(global_args, "chunk_repair_limit", None))
+            ):
                 result = await run_analysis_async(
                     api,
                     global_args,

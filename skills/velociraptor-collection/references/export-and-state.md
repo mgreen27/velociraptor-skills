@@ -43,7 +43,8 @@ A failed artifact summary is a terminal local-analysis result and does not block
 sibling artifacts. Resume it with `--retry-failed` and the exact request ID, which
 reuses accepted chunks; `--reset-artifact` discards them. Either way the existing
 Velociraptor flow is reused and only that component is replaced. Chunks that fail
-every attempt are listed in the request's `analysis/failed-chunks.json`.
+every attempt are listed in the request's `analysis/failed-chunks.json`, including
+those an AI repair call then recovered (`resolution` `by: repair`).
 
 `state.json` is created before queue submission and carries `queue_progress`:
 `starting`, `running`, `complete`, or `failed`, plus the active artifact,

@@ -59,6 +59,17 @@ def add_prompt_debug_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_chunk_repair_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--chunk-repair-limit", type=int, choices=range(0, 21), default=None, metavar="N",
+        help=(
+            "After a chunk fails every correction attempt, it is recorded and gets one AI "
+            "repair call that must pass the same validation. N caps repair calls per "
+            "run (default 4, or AI_SKILLS_ANALYST_AGENT_CHUNK_REPAIR_LIMIT); 0 disables."
+        ),
+    )
+
+
 def add_query_timeout_argument(parser: argparse.ArgumentParser) -> None:
     """Shared per-query ceiling for hunt and host analysis clients."""
     parser.add_argument(

@@ -29,6 +29,7 @@ from vraptor.analyze import host as collection_analysis
 from vraptor.analyze import references as evidence_references
 from vraptor.analyze import final_review as host_final_review
 from vraptor.analyze import synthesis as synthesis_policy
+from vraptor.analyze import chunk_repair
 from vraptor.analyze import prompt_debug
 from vraptor.analyze import recovery
 from vraptor.analyze import report_priority
@@ -704,7 +705,18 @@ async def _validated_pool_async(
     correction_attempts: int = analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS,
     accepted_callback: Callable[[AgentRequest, dict[str, Any]], None] | None = None,
     failed_callback: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
+    exhausted_callback: Callable[[AgentRequest, dict[str, Any]], None] | None = None,
+    repaired_callback: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
+    repair_references: Callable[[AgentRequest], Iterable[str]] | None = None,
+    repair_prompt_fits: Callable[[str], bool] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Run, validate and correct tasks; a chunk that uses its budget gets one repair.
+
+    ``exhausted_callback`` records the failure before that repair call is sent;
+    ``repaired_callback`` receives a chunk the repair call recovered.
+    ``repair_references`` gives a chunk's source references (diagnosis locations
+    may cite only these) and ``repair_prompt_fits`` applies the input limit.
+    """
     correction_attempts = analysis_limits.correction_attempts(correction_attempts)
     accepted: dict[str, dict[str, Any]] = {}
     records: dict[str, dict[str, Any]] = {}
@@ -719,6 +731,8 @@ async def _validated_pool_async(
             execution_cancelled = True
             raise
         except Exception as exc:
+            # The runner's input guard message is protocol text; other errors may hold values.
+            input_limit = str(exc).startswith("Agent prompt exceeds maximum input tokens")
             return AgentResult(
                 task_id=task.task_id,
                 status="failed",
@@ -727,8 +741,12 @@ async def _validated_pool_async(
                 events_file="",
                 manifest_file="",
                 elapsed_seconds=0.0,
-                error=f"{type(exc).__name__}: worker execution failed",
-                error_classification="worker_exception",
+                error=(
+                    str(exc).split("\n", 1)[0][:200]
+                    if input_limit
+                    else f"{type(exc).__name__}: worker execution failed"
+                ),
+                error_classification="input_limit" if input_limit else "worker_exception",
             )
 
     async def process(base_task: AgentRequest) -> tuple[
@@ -749,7 +767,15 @@ async def _validated_pool_async(
                 failed_callback(base_task, record, attempt_prompts)
             return None, record
 
-        for attempt in range(1, correction_attempts + 2):
+        policy = chunk_repair.active() if base_task.metadata.get("stage") == "chunk" else None
+        repair_reply: chunk_repair.RepairReply | None = None
+        repair_attempt = 0
+        findings_before = 0
+        skipped_repair = ""
+        for attempt in range(1, correction_attempts + 3):
+            repairing = attempt == repair_attempt
+            if attempt > correction_attempts + 1 and not repairing:
+                break
             started_at = now_utc()
             attempt_prompts.append(current_task.prompt)
             result = await execute_safely(current_task)
@@ -762,8 +788,22 @@ async def _validated_pool_async(
             diagnostics: list[dict[str, Any]] = []
             normalized: dict[str, Any] | None = None
             if result.status == "succeeded":
+                text: str | None = result.output
+                if repairing:
+                    repair_reply = chunk_repair.parse_repair_response(
+                        result.output,
+                        defect_codes=[str(item.get("code") or "") for item in correction_defects],
+                        source_refs=set(repair_references(base_task)) if repair_references else set(),
+                        previous_line_count=len(str(attempt_history[-1]["run"].get("output") or "").splitlines()),
+                    )
+                    text = repair_reply.body
                 try:
-                    normalized = validate(current_task, result.output)
+                    if text is None:
+                        raise collection_analysis.WorkerResultError(
+                            "repair response has no REPAIRED body",
+                            diagnostics=[{"code": "repair_unrepairable" if repair_reply and repair_reply.unrepairable else "repair_missing_body"}],
+                        )
+                    normalized = validate(current_task, text)
                     error = ""
                 except (ValueError, collection_analysis.WorkerResultError) as exc:
                     error = str(exc)
@@ -782,6 +822,29 @@ async def _validated_pool_async(
                     "Agent prompt exceeds maximum input tokens"
                 )
             )
+            # A validation failure that used the whole budget gets one repair call.
+            repair_next = (
+                normalized is None
+                and not retryable
+                and not repairing
+                and policy is not None
+                and result.status == "succeeded"
+                and not is_output_limit_failure(result)
+            )
+            repair_prompt: str | None = None
+            if repair_next:
+                repair_prompt = chunk_repair.build_repair_prompt(
+                    base_task.prompt,
+                    defects=diagnostics,
+                    earlier_defects=correction_defects,
+                    previous_output=result.output,
+                    rejected_count=attempt,
+                    fits=repair_prompt_fits,
+                )
+                if repair_prompt is None:
+                    repair_next, skipped_repair = False, "repair_prompt_too_large"
+                elif not policy.claim():
+                    repair_next, skipped_repair = False, "repair_limit_reached"
             attempt_history.append(
                 {
                     "attempt": attempt,
@@ -789,9 +852,10 @@ async def _validated_pool_async(
                         "accepted"
                         if normalized is not None
                         else "retrying"
-                        if retryable
+                        if retryable or repair_next
                         else "failed"
                     ),
+                    **({"repair": True} if repairing else {}),
                     "error": error,
                     "diagnostics": diagnostics,
                     "run": asdict(result),
@@ -814,6 +878,22 @@ async def _validated_pool_async(
                 },
                 "inputs": inputs,
             }
+            if repairing:
+                record["repair"] = chunk_repair.summary(
+                    repair_reply,
+                    outcome=(
+                        "repaired" if normalized is not None
+                        else "unrepairable" if repair_reply and repair_reply.unrepairable
+                        else "failed"
+                    ),
+                    attempt=attempt,
+                    findings_before=findings_before,
+                    findings_after=len(normalized.get("findings") or []) if normalized is not None else None,
+                )
+            elif skipped_repair:
+                record["repair"] = chunk_repair.summary(
+                    None, outcome="skipped", attempt=attempt, findings_before=0, reason=skipped_repair,
+                )
             if on_progress is not None:
                 on_progress(
                     {
@@ -824,7 +904,7 @@ async def _validated_pool_async(
                             "accepted"
                             if normalized is not None
                             else "retrying"
-                            if retryable
+                            if retryable or repair_next
                             else "failed"
                         ),
                         "error": error,
@@ -834,6 +914,25 @@ async def _validated_pool_async(
                 )
             if normalized is not None and accepted_callback is not None:
                 accepted_callback(base_task, normalized)
+            if normalized is not None and repairing and repaired_callback is not None:
+                repaired_callback(base_task, record, attempt_prompts)
+            if repair_next:
+                correction_defects.extend(diagnostics)
+                findings_before = max(
+                    chunk_repair.finding_count(str(item["run"].get("output") or ""))
+                    for item in attempt_history
+                )
+                # Log first: the failure is on record even if the repair call never returns.
+                if exhausted_callback is not None:
+                    exhausted_callback(base_task, {**record, "repair": {"outcome": "pending"}})
+                repair_attempt = attempt + 1
+                current_task = replace(
+                    base_task,
+                    prompt=str(repair_prompt),
+                    output_name=base_task.output_name + ".repair",
+                    metadata={**base_task.metadata, "attempt": attempt + 1, "repair": True},
+                )
+                continue
             if normalized is None and not retryable:
                 return failed(record)
             if normalized is not None:
@@ -1555,6 +1654,38 @@ async def execute_host_synthesis_from_artifact_results_async(
     return result
 
 
+def _label_repaired_chunks(
+    artifact_results: list[dict[str, Any]],
+    plan: dict[str, Any],
+    chunk_by_index: dict[int, dict[str, Any]],
+    task_records: dict[str, dict[str, Any]],
+) -> None:
+    """Name every chunk accepted after AI repair in its artifact's coverage and limitations."""
+    owned = {
+        str(task["task_id"]): [chunk_by_index[index] for index in task.get("chunk_indices") or []]
+        for task in plan.get("artifact_tasks") or []
+    }
+    for result in artifact_results:
+        lines = []
+        for chunk in owned.get(str(result.get("task_id")), []):
+            task_id = f"{chunk['task_id']}-chunk-{chunk['task_chunk_index']}"
+            record = task_records.get(task_id) or {}
+            repair = dict(record.get("repair") or {})
+            if record.get("status") == "accepted" and repair.get("outcome") == "repaired":
+                lines.append(analysis_summary.failed_chunk_line({
+                    **{key: chunk[key] for key in ("row_start", "row_end", "task_chunk_index", "task_chunk_count")},
+                    **{key: value for key, value in dict(record.get("inputs") or {}).items()
+                       if key in {"first_reference", "last_reference"}},
+                    "artifact": result.get("artifact", ""),
+                    "key": f"{result.get('artifact', '')}:{task_id}",
+                    "status": "resolved",
+                    "repair": recovery.safe_repair(repair),
+                }))
+        if lines:
+            result.setdefault("coverage", {})["repaired_chunks"] = len(lines)
+            result["limitations"] = list(dict.fromkeys([*list(result.get("limitations") or []), *lines]))
+
+
 async def execute_analysis_workload_async(
     *,
     plan: dict[str, Any],
@@ -1571,10 +1702,14 @@ async def execute_analysis_workload_async(
     chunk_recovery: recovery.ChunkRecovery | None = None,
     chunk_failed: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
     chunk_waiver: Callable[[AgentRequest], str | None] | None = None,
+    chunk_exhausted: Callable[[AgentRequest, dict[str, Any]], None] | None = None,
+    chunk_repaired: Callable[[AgentRequest, dict[str, Any], list[str]], None] | None = None,
 ) -> dict[str, Any]:
     """Execute chunk, artifact-synthesis, then host-synthesis stages.
 
-    ``chunk_failed`` receives each chunk that exhausted its attempts.
+    ``chunk_exhausted`` receives a chunk that used its correction budget, before
+    its repair call; ``chunk_repaired`` receives one that call recovered, and
+    ``chunk_failed`` each chunk that stays failed.
     ``chunk_waiver`` returns an operator's reason for a chunk that must not be
     sent again; that chunk becomes a named coverage gap.
     """
@@ -1646,6 +1781,7 @@ async def execute_analysis_workload_async(
                     "first_reference": next(iter(source_rows_by_index[index]), ""),
                     "last_reference": next(reversed(source_rows_by_index[index]), ""),
                 },
+                "source_aliases": sorted({ref.split("-R", 1)[0] for ref in source_rows_by_index[index]}),
                 "analysis_routing": analysis_limits.stage_routing("chunk"),
             },
         )
@@ -1684,9 +1820,14 @@ async def execute_analysis_workload_async(
                 except (ValueError, KeyError, TypeError):
                     pass  # Changed/corrupt decisions are reviewed again, never trusted.
                 else:
+                    # Duck-typed checkpoints may predate repair labels.
+                    saved_repair = getattr(chunk_recovery, "repair", None)
+                    repair = saved_repair(task) if saved_repair is not None else {}
                     reused_records[task.task_id] = {
                         "task_id": task.task_id, "stage": "chunk", "status": "accepted",
                         "attempts": 0, "reused": True, "attempt_history": [],
+                        **({"repair": repair, "inputs": dict(task.metadata.get("chunk_inputs") or {})}
+                           if repair else {}),
                     }
                     continue
             reason = chunk_waiver(task) if chunk_waiver is not None else None
@@ -1705,6 +1846,12 @@ async def execute_analysis_workload_async(
                 continue
             yield task
 
+    def chunk_repaired_callback(task: AgentRequest, record: dict[str, Any], prompts: list[str]) -> None:
+        if (mark_repaired := getattr(chunk_recovery, "mark_repaired", None)) is not None:
+            mark_repaired(task, record.get("repair"))
+        if chunk_repaired is not None:
+            chunk_repaired(task, record, prompts)
+
     accepted_chunks, task_records = await _validated_pool_async(
         pending_chunks(),
         max_concurrency=spec.max_concurrency,
@@ -1716,6 +1863,13 @@ async def execute_analysis_workload_async(
             "validation_correction_attempts", analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS)),
         accepted_callback=chunk_recovery.accept if chunk_recovery is not None else None,
         failed_callback=chunk_failed,
+        exhausted_callback=chunk_exhausted,
+        repaired_callback=chunk_repaired_callback,
+        repair_references=lambda task: source_rows_by_index[int(task.metadata["chunk"]["chunk_index"])],
+        repair_prompt_fits=chunk_repair.input_fits(
+            dict(plan.get("analysis_limits") or {}).get("maximum_input_tokens"),
+            dict(plan.get("analysis_limits") or {}).get("token_encoding"),
+        ),
     )
     accepted_chunks.update(reused_chunks)
     task_records.update(reused_records)
@@ -1919,6 +2073,7 @@ async def execute_analysis_workload_async(
                 }
             )
 
+    _label_repaired_chunks(artifact_results, plan, chunk_by_index, task_records)
     artifact_order = {
         str(task["task_id"]): index
         for index, task in enumerate(plan.get("artifact_tasks") or [])

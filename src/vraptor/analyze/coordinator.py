@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from vraptor.analyze import chunk_repair
 from vraptor.analyze import prompt_debug
 
 import asyncio
@@ -2744,6 +2745,45 @@ def iter_streaming_chunk_work(
         del work
 
 
+def _streaming_review_record(
+    base_task: AgentRequest,
+    chunk: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    review_history: list[dict[str, Any]],
+    attempts: int,
+    repair: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Raw record for recovery.task_diagnostics; it never leaves the chunk coroutine unfiltered."""
+    return {
+        "task_id": base_task.task_id,
+        "stage": "chunk",
+        "status": "accepted" if dict(repair or {}).get("outcome") == "repaired" else "failed",
+        "attempts": attempts,
+        "attempt_history": review_history,
+        "coverage": {
+            key: chunk[key]
+            for key in ("row_start", "row_end", "row_count", "task_chunk_index", "task_chunk_count")
+        },
+        "inputs": {
+            "input_sha256": recovery.fingerprint(base_task.prompt),
+            **{key: manifest[key] for key in ("ordinal", "input_tokens") if key in manifest},
+            **_manifest_references(manifest),
+        },
+        **({"repair": repair} if repair else {}),
+    }
+
+
+def _repaired_chunk_line(artifact: str, manifest: Mapping[str, Any], repair: Any) -> str:
+    """Hunt chunks are named by reference range and ledger key; their row positions are per-chunk."""
+    return analysis_summary.failed_chunk_line({
+        **_manifest_references(dict(manifest)),
+        "artifact": artifact,
+        "key": str(manifest.get("chunk_id") or ""),
+        "status": "resolved",
+        "repair": recovery.safe_repair(repair),
+    })
+
+
 async def _execute_streaming_chunk_work_async(
     work: Mapping[str, Any],
     *,
@@ -2772,9 +2812,18 @@ async def _execute_streaming_chunk_work_async(
     # Raw outputs stay in this coroutine; only value-free review data leaves it.
     review_history: list[dict[str, Any]] = []
     attempt_prompts: list[str] = []
+    correction_defects: list[dict[str, Any]] = []
     correction_attempts = analysis_limits.correction_attempts(work.get(
         "correction_attempts", analysis_limits.DEFAULT_VALIDATION_CORRECTION_ATTEMPTS))
-    for attempt in range(1, correction_attempts + 2):
+    policy = chunk_repair.active()
+    repair_reply: chunk_repair.RepairReply | None = None
+    repair_attempt = 0
+    findings_before = 0
+    skipped_repair = ""
+    for attempt in range(1, correction_attempts + 3):
+        repairing = attempt == repair_attempt
+        if attempt > correction_attempts + 1 and not repairing:
+            break
         started_at = flow_analysis.now_utc()
         attempt_prompts.append(task.prompt)
         run = None
@@ -2816,9 +2865,29 @@ async def _execute_streaming_chunk_work_async(
             failure_type = f"agent_{str(run.status or 'failed')}"
             final_diagnostics = []
             if run.status == "succeeded":
-                try:
-                    normalized = collection_analysis.validate_context_worker_result(
+                text: str | None = run.output
+                if repairing:
+                    repair_reply = chunk_repair.parse_repair_response(
                         run.output,
+                        defect_codes=[str(item.get("code") or "") for item in correction_defects],
+                        source_refs=set(source_rows),
+                        previous_line_count=len(
+                            str(review_history[-1]["run"].get("output") or "").splitlines()
+                        ),
+                    )
+                    text = repair_reply.body
+                try:
+                    if text is None:
+                        raise collection_analysis.WorkerResultError(
+                            "repair response has no REPAIRED body",
+                            diagnostics=[{
+                                "code": "repair_unrepairable"
+                                if repair_reply is not None and repair_reply.unrepairable
+                                else "repair_missing_body"
+                            }],
+                        )
+                    normalized = collection_analysis.validate_context_worker_result(
+                        text,
                         artifact=str(chunk["artifact"]),
                         chunk_index=int(chunk["task_chunk_index"]),
                         chunk_count=int(chunk["task_chunk_count"]),
@@ -2847,6 +2916,20 @@ async def _execute_streaming_chunk_work_async(
                 )
                 artifact_result["question"] = str(work["question"]).strip()
                 _add_provenance(artifact_result, dict(work["provenance"]))
+                repair = (
+                    chunk_repair.summary(
+                        repair_reply, outcome="repaired", attempt=attempt,
+                        findings_before=findings_before,
+                        findings_after=len(normalized.get("findings") or []),
+                    )
+                    if repairing
+                    else None
+                )
+                if repair is not None:
+                    artifact_result["limitations"] = [
+                        *list(artifact_result.get("limitations") or []),
+                        _repaired_chunk_line(str(chunk["artifact"]), dict(work["manifest"]), repair),
+                    ]
                 if progress_callback is not None:
                     progress_callback(
                         {
@@ -2864,6 +2947,25 @@ async def _execute_streaming_chunk_work_async(
                     "result": artifact_result,
                     "attempt_failures": attempt_failures,
                 }
+                if repair is not None:
+                    review_history.append({
+                        "attempt": attempt, "status": "accepted", "repair": True,
+                        "error": "", "diagnostics": [],
+                        "started_at": started_at, "completed_at": flow_analysis.now_utc(),
+                        "run": {"status": run.status, "output": run.output},
+                    })
+                    outcome["repair"] = repair
+                    outcome["review"] = recovery.task_diagnostics(
+                        _streaming_review_record(base_task, chunk, dict(work["manifest"]), review_history, attempt, repair)
+                    )
+                    outcome["evidence"] = prompt_debug.capture_failed_chunk(
+                        key=str(dict(work["manifest"])["chunk_id"]),
+                        prompts=attempt_prompts,
+                        record={"attempt_history": review_history},
+                        source_ids=sorted(
+                            {str(row.get("_SourceId") or "") for row in source_rows.values()} - {""}
+                        ),
+                    )
                 release_ephemeral_payload()
                 return outcome
         except Exception as exc:  # executor failures must become bounded outcomes
@@ -2880,12 +2982,35 @@ async def _execute_streaming_chunk_work_async(
         # model request is only a semantic correction for a successful provider
         # response that failed deterministic output validation.
         retryable = attempt <= correction_attempts and failure_type == "validation_failed"
+        # A validation failure that used the whole budget gets one repair call.
+        repair_next = (
+            not retryable and not repairing and policy is not None
+            and failure_type == "validation_failed"
+        )
+        repair_prompt: str | None = None
+        if repair_next:
+            runner_limits = getattr(runner, "limits", None)
+            repair_prompt = chunk_repair.build_repair_prompt(
+                base_task.prompt,
+                defects=final_diagnostics,
+                earlier_defects=correction_defects,
+                previous_output=str(getattr(run, "output", "") or ""),
+                rejected_count=attempt,
+                fits=chunk_repair.input_fits(
+                    getattr(runner_limits, "maximum_input_tokens", None),
+                    getattr(runner_limits, "token_encoding", None),
+                ),
+            )
+            if repair_prompt is None:
+                repair_next, skipped_repair = False, "repair_prompt_too_large"
+            elif not policy.claim():
+                repair_next, skipped_repair = False, "repair_limit_reached"
         if final_error.startswith("Agent prompt exceeds maximum input tokens"):
             failure_type = "input_limit"
         attempt_failures.append(
             _compact_chunk_attempt_failure(
                 attempt=attempt,
-                status="retrying" if retryable else "failed",
+                status="retrying" if retryable or repair_next else "failed",
                 failure_type=failure_type,
                 error=final_error,
                 diagnostics=[*initial_diagnostics, *final_diagnostics],
@@ -2895,7 +3020,8 @@ async def _execute_streaming_chunk_work_async(
         review_history.append(
             {
                 "attempt": attempt,
-                "status": "retrying" if retryable else "failed",
+                "status": "retrying" if retryable or repair_next else "failed",
+                **({"repair": True} if repairing else {}),
                 "error": final_error,
                 "diagnostics": initial_diagnostics or final_diagnostics,
                 "started_at": started_at,
@@ -2920,7 +3046,7 @@ async def _execute_streaming_chunk_work_async(
                     "task_id": task.task_id,
                     "chunk_id": str(dict(work["manifest"])["chunk_id"]),
                     "attempt": attempt,
-                    "status": "retrying" if retryable else "failed",
+                    "status": "retrying" if retryable or repair_next else "failed",
                     "failure_type": failure_type,
                     "error": final_error[:MAX_FAILED_CHUNK_ERROR_CHARS],
                     "diagnostics": initial_diagnostics or final_diagnostics,
@@ -2928,6 +3054,20 @@ async def _execute_streaming_chunk_work_async(
                     "error_class": error_class,
                 }
             )
+        correction_defects.extend(final_diagnostics)
+        if repair_next:
+            findings_before = max(
+                chunk_repair.finding_count(str(item["run"].get("output") or ""))
+                for item in review_history
+            )
+            repair_attempt = attempt + 1
+            task = replace(
+                base_task,
+                prompt=str(repair_prompt),
+                output_name=base_task.output_name + ".repair",
+                metadata={**base_task.metadata, "attempt": attempt + 1, "repair": True},
+            )
+            continue
         if not retryable:
             break
         task = replace(
@@ -2935,28 +3075,26 @@ async def _execute_streaming_chunk_work_async(
             prompt=collection_analysis_runtime.render_retry_prompt(
                 base_task.prompt,
                 error=final_error,
-                diagnostics=final_diagnostics,
+                diagnostics=correction_defects,
             ),
             output_name=base_task.output_name + f".retry-{attempt + 1}",
             metadata={**base_task.metadata, "attempt": attempt + 1},
         )
     manifest = dict(work["manifest"])
-    record = {
-        "task_id": base_task.task_id,
-        "stage": "chunk",
-        "status": "failed",
-        "attempts": attempt,
-        "attempt_history": review_history,
-        "coverage": {
-            key: chunk[key]
-            for key in ("row_start", "row_end", "row_count", "task_chunk_index", "task_chunk_count")
-        },
-        "inputs": {
-            "input_sha256": recovery.fingerprint(base_task.prompt),
-            **{key: manifest[key] for key in ("ordinal", "input_tokens") if key in manifest},
-            **_manifest_references(manifest),
-        },
-    }
+    repair = (
+        chunk_repair.summary(
+            repair_reply,
+            outcome="unrepairable" if repair_reply is not None and repair_reply.unrepairable else "failed",
+            attempt=attempt, findings_before=findings_before,
+        )
+        if repair_attempt
+        else chunk_repair.summary(
+            None, outcome="skipped", attempt=attempt, findings_before=0, reason=skipped_repair,
+        )
+        if skipped_repair
+        else None
+    )
+    record = _streaming_review_record(base_task, chunk, manifest, review_history, attempt, repair)
     outcome = {
         "status": "failed",
         "chunk_id": str(manifest["chunk_id"]),
@@ -3013,6 +3151,9 @@ async def execute_streaming_chunks_async(
         active_runner: Any = runner
         if shared_execute is not None:
             class SharedRunner:
+                # Read by the repair prompt's input check.
+                limits = runtime_limits
+
                 async def run(self, task: AgentRequest, **kwargs: Any) -> Any:
                     value = shared_execute(
                         task,
@@ -6132,18 +6273,23 @@ async def _analyze_hunt_flows_locked(
         source_hunt_state=str(hunt_state or "unknown"),
     )
     failed_chunks_path = analysis_root / FAILED_CHUNKS_FILENAME
-    if failed_chunk_count or failed_chunks_path.is_file():
+    chunk_manifests = {**evtx_partition_manifests, **emitted_chunks}
+    repaired_outcomes = {
+        str(outcome.get("chunk_id") or ""): outcome
+        for outcome in [*evtx_partition_outcomes, *chunk_outcomes]
+        if str(outcome.get("status") or "") == "accepted" and outcome.get("repair")
+    }
+    if failed_chunk_count or repaired_outcomes or failed_chunks_path.is_file():
         failed_chunk_ledger = recovery.FailedChunkLedger(
             failed_chunks_path, {"kind": "hunt", "hunt_id": hunt_id, "org_id": org_id},
         )
-        for chunk_id in accepted_results:
-            failed_chunk_ledger.resolve(chunk_id)
-        for chunk_id, outcome in sorted(failed_outcomes.items()):
+        for chunk_id, outcome in sorted({**failed_outcomes, **repaired_outcomes}.items()):
+            # Repaired chunks are logged as failures first, then resolved by the repair.
             failed_chunk_ledger.record_failure(
                 chunk_id,
                 _failed_chunk_review(outcome),
                 identity={
-                    "artifact": str(dict(emitted_chunks.get(chunk_id) or {}).get("artifact") or ""),
+                    "artifact": str(dict(chunk_manifests.get(chunk_id) or {}).get("artifact") or ""),
                     "hunt_id": hunt_id,
                     "chunk_id": chunk_id,
                 },
@@ -6157,6 +6303,13 @@ async def _analyze_hunt_flows_locked(
                 },
                 evidence=outcome.get("evidence"),
             )
+        for chunk_id in sorted(set(accepted_results) | set(repaired_outcomes)):
+            failed_chunk_ledger.resolve(
+                chunk_id, repair=dict(repaired_outcomes.get(chunk_id) or {}).get("repair"),
+            )
+    if repaired_outcomes:
+        run_record["failed_chunks_file"] = str(failed_chunks_path)
+        run_record["repaired_chunk_ids"] = sorted(repaired_outcomes)[:MAX_FAILED_CHUNK_ATTEMPTS_PER_RUN]
     if failed_chunk_count:
         run_record["status"] = "failed"
         run_record["failed_chunks_file"] = str(failed_chunks_path)
@@ -6312,6 +6465,20 @@ async def _analyze_hunt_flows_locked(
     full_result = copy.deepcopy(dict(synthesis["host_result"]))
     if synthesis_mode == "none":
         full_result = copy.deepcopy(accepted_candidates)
+    if repaired_outcomes:
+        # Synthesis does not carry input limitations; the repair labels are added here.
+        full_result["limitations"] = list(dict.fromkeys([
+            *list(full_result.get("limitations") or []),
+            *(
+                _repaired_chunk_line(
+                    str(dict(chunk_manifests.get(chunk_id) or {}).get("artifact") or ""),
+                    {**dict(chunk_manifests.get(chunk_id) or {}), "chunk_id": chunk_id},
+                    outcome.get("repair"),
+                )
+                for chunk_id, outcome in sorted(repaired_outcomes.items())
+            ),
+        ]))
+        full_result.setdefault("coverage", {})["repaired_chunks"] = len(repaired_outcomes)
     result = _compact_synthesis_result(full_result)
     if synthesis_mode == "full":
         result["findings"] = analysis_summary.consolidate_exact_findings(

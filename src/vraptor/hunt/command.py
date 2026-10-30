@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from vraptor.analyze import chunk_repair
 from vraptor.analyze import prompt_debug
 
 import argparse
@@ -3552,6 +3553,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     analysis_cli_arguments.add_skip_ai_argument(analyze)
     analysis_cli_arguments.add_prompt_debug_argument(analyze)
+    analysis_cli_arguments.add_chunk_repair_argument(analyze)
     model_options.add_arguments(analyze)
     analysis_cli_arguments.add_snapshot_review_arguments(analyze)
     analyze.add_argument(
@@ -3845,7 +3847,9 @@ def main(argv: list[str] | None = None, *, existing_only: bool = False) -> int:
                 resolve_case_root(args) / investigation_id,
                 args.debug_chunk_prompts,
                 keep_failed=bool(getattr(args, "keep_failed_chunk_evidence", False)),
-            ) as prompt_dump:
+            ) as prompt_dump, chunk_repair.session(
+                chunk_repair.resolve_limit(getattr(args, "chunk_repair_limit", None))
+            ):
                 payload = command_analyze(args)
             if args.debug_chunk_prompts:
                 payload["debug_chunk_prompts"] = prompt_dump.summary()

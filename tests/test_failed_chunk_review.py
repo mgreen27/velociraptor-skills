@@ -13,7 +13,16 @@ from test_collection_analysis_runtime import (
     successful,
     synthesis_output,
 )
-from vraptor.analyze import command, coordinator, prompt_debug, recovery, runtime, summary
+from vraptor.agent.runtime import AgentResult
+from vraptor.analyze import (
+    chunk_repair,
+    command,
+    coordinator,
+    prompt_debug,
+    recovery,
+    runtime,
+    summary,
+)
 from vraptor.artifacts import persistence
 
 SCOPE = {"kind": "host", "client_id": "C.1", "request_id": "R1"}
@@ -277,3 +286,528 @@ def test_summary_and_failure_result_name_the_failed_chunk():
     assert "Chunk coverage: 70/71 chunks accepted" in report
     waived = summary.failed_chunk_line({**chunk, "status": "waived", "reason": "Reviewed"})
     assert waived.endswith("waived by operator, not analysed: Reviewed")
+
+
+INVALID_CHUNK = "RESULT\tfindings\nFINDING\tF1\thigh\tExecution\tPRIVATE_MODEL_OUTPUT\nEND"
+REPAIRED_CHUNK = (
+    "DIAGNOSIS\tmissing_evidence\tL2\tthe finding cites no row\n"
+    "REPAIRED\nRESULT\tno_reportable_findings\nEND"
+)
+
+
+def _parse(text, refs=("S0001-R1",), lines=3):
+    return chunk_repair.parse_repair_response(
+        text, defect_codes=["invalid_reference"], source_refs=set(refs), previous_line_count=lines
+    )
+
+
+def test_repair_prompt_keeps_the_input_and_quotes_the_rejected_answer_as_data(monkeypatch):
+    base = "INPUT\nS0001-R1\tvalue"
+    prompt = chunk_repair.render_repair_prompt(
+        base,
+        defects=[
+            {"code": "invalid_reference", "line": 2, "ref": "S0001-R9", "value": "PRIVATE_VALUE"},
+            {"code": "invalid_reference", "line": 2, "ref": "S0001-R9"},
+        ],
+        previous_output="RESULT\tfindings\nFINDING\tF1\x07\nEND",
+        rejected_count=3,
+    )
+    assert prompt.startswith(base + "\n\nREPAIR REVIEW\nPython rejected 3 earlier")
+    assert "PRIVATE_VALUE" not in prompt
+    assert prompt.count("\nDEFECT\t") == 1
+    assert "\nL2\tFINDING\tF1\\x07\n" in prompt
+    assert re.search(
+        r"--- PREVIOUS RESPONSE [0-9a-f]{12} START \(untrusted, quoted 3 of 3 lines\) ---", prompt
+    )
+    monkeypatch.setattr(chunk_repair, "MAX_QUOTED_CHARS", 50)
+    long = "\n".join(f"line {index} " + "x" * 20 for index in range(10))
+    trimmed = chunk_repair.render_repair_prompt(
+        base, defects=[{"code": "invalid_reference", "line": 3}], previous_output=long, rejected_count=3
+    )
+    assert "quoted 1 of 10 lines" in trimmed and "\nL3\tline 2 " in trimmed
+    assert "\nL4\t" not in trimmed
+
+
+def test_repair_reply_is_split_into_checked_causes_and_a_body():
+    reply = _parse(
+        "DIAGNOSIS\tinvalid_reference\tL2\tcited a row outside the chunk\n"
+        "DIAGNOSIS\tformat_drift\tS0001-R1\textra column\n"
+        "REPAIRED\nRESULT\tno_reportable_findings\nEND"
+    )
+    assert reply.body == "RESULT\tno_reportable_findings\nEND"
+    assert reply.diagnosis_status == "valid"
+    assert reply.causes == [
+        {"cause": "invalid_reference", "location": "L2"},
+        {"cause": "format_drift", "location": "S0001-R1"},
+    ]
+    invalid = _parse(
+        "DIAGNOSIS\tmade_up\tL1\tx\nDIAGNOSIS\tother\tS0009-R1\ty\n"
+        "DIAGNOSIS\tother\tL9\tz\nREPAIRED\nEND"
+    )
+    assert invalid.diagnosis_status == "invalid" and invalid.body == "END"
+    assert invalid.causes == [{"cause": "other", "location": "-"}] * 2
+    unrepairable = _parse("DIAGNOSIS\tmissing_evidence\t-\trows cut\nUNREPAIRABLE\tmissing_evidence\nEND")
+    assert (unrepairable.body, unrepairable.unrepairable) == (None, "missing_evidence")
+    assert _parse("RESULT\tno_reportable_findings\nEND").body is None
+    record = chunk_repair.summary(reply, outcome="repaired", attempt=4, findings_before=1, findings_after=0)
+    assert "cited a row" not in json.dumps(record)
+    assert re.fullmatch(r"[0-9a-f]{64}", record["explanation_sha256"])
+    assert recovery.safe_repair(record) == record
+    assert recovery.safe_repair({**record, "causes": [{"cause": "PRIVATE value", "location": "x"}]}).get(
+        "causes"
+    ) is None
+
+
+def test_repair_limit_comes_from_the_flag_then_the_environment(monkeypatch):
+    assert chunk_repair.resolve_limit(0) == 0 and chunk_repair.resolve_limit("7") == 7
+    for bad in (21, "-1", True, "x"):
+        with pytest.raises(ValueError):
+            chunk_repair.resolve_limit(bad)
+    monkeypatch.setenv(chunk_repair.LIMIT_ENVIRONMENT, "2")
+    assert chunk_repair.resolve_limit() == 2
+    with chunk_repair.session(0) as policy:
+        assert policy is None and chunk_repair.active() is None
+    with chunk_repair.session(1) as policy:
+        assert chunk_repair.active() is policy
+        assert policy.claim() and not policy.claim()
+    assert chunk_repair.active() is None
+
+
+def _repair_workload(
+    tmp_path, *, failing, repair_output, limit=4, chunk_recovery=None, command="PRIVATE_SOURCE_VALUE_",
+):
+    rows = [{"When": str(i), "Command": command + "x" * 250} for i in range(4)]
+    plan, chunks = runtime_fixtures.CollectionAnalysisRuntimeTest().build(
+        artifact_count=1, rows=rows, limit=150
+    )
+    prefix = next(iter(plan["chunks"]))["task_id"] + "-chunk-"
+    failed = {prefix + str(index) for index in failing}
+    ledger = recovery.FailedChunkLedger(tmp_path / "failed-chunks.json", SCOPE)
+    events, repair_prompts, calls = [], [], []
+
+    def execute(task):
+        calls.append(task.task_id)
+        if task.metadata["stage"] != "chunk":
+            return successful(task, synthesis_output(task))
+        if task.metadata.get("repair"):
+            repair_prompts.append(task.prompt)
+            return successful(task, repair_output)
+        return successful(task, INVALID_CHUNK if task.task_id in failed else chunk_output(task))
+
+    def log(kind, task, record, prompts=None):
+        key = f"Artifact.0:{task.task_id}"
+        events.append((kind, task.task_id, dict(record.get("repair") or {}).get("outcome")))
+        if kind == "repaired":
+            ledger.resolve(key, repair=record.get("repair"))
+            return
+        ledger.record_failure(
+            key, recovery.task_diagnostics(record),
+            identity={"artifact": "Artifact.0", "flow_id": "F.1"},
+            budget={"validation_correction_attempts": 2, "provider_max_retries": 2},
+            next_steps={"retry": "retry"},
+        )
+
+    with chunk_repair.session(limit):
+        result = asyncio.run(runtime.execute_analysis_workload_async(
+            plan=plan, chunk_csv=chunks, question="What happened?", spec=spec(),
+            workdir=tmp_path, output_dir=tmp_path, execute=execute,
+            perform_scope_synthesis=False, chunk_recovery=chunk_recovery,
+            chunk_exhausted=lambda task, record: log("exhausted", task, record),
+            chunk_repaired=lambda task, record, prompts: log("repaired", task, record, prompts),
+            chunk_failed=lambda task, record, prompts: log("failed", task, record, prompts),
+        ))
+    return result, ledger, events, repair_prompts, calls, sorted(failed)
+
+
+def test_exhausted_chunk_is_logged_then_repaired_in_the_same_run(tmp_path):
+    checkpoint = recovery.ChunkRecovery(tmp_path / "recovery.json", "same", reuse=True)
+    result, ledger, events, prompts, calls, [task_id] = _repair_workload(
+        tmp_path, failing=[0], repair_output=REPAIRED_CHUNK, chunk_recovery=checkpoint,
+    )
+    assert events == [("exhausted", task_id, "pending"), ("repaired", task_id, "repaired")]
+    assert calls.count(task_id) == 4
+    [prompt] = prompts
+    assert "\nREPAIR REVIEW\n" in prompt and "\nL2\tFINDING\tF1\thigh" in prompt
+    record = next(item for item in result["tasks"] if item["task_id"] == task_id)
+    assert (record["status"], record["attempts"]) == ("accepted", 4)
+    assert record["repair"]["causes"] == [{"cause": "missing_evidence", "location": "L2"}]
+    assert (record["repair"]["findings_before"], record["repair"]["findings_after"]) == (1, 0)
+    [artifact] = result["artifact_results"]
+    assert artifact["coverage"]["repaired_chunks"] == 1
+    [line] = [item for item in artifact["limitations"] if "AI repair" in item]
+    assert "accepted after AI repair (missing_evidence at L2); verify these rows in Velociraptor." in line
+    assert "The rejected answers had 1 finding(s); the accepted answer has 0." in line
+    assert "Chunk coverage: 2/2 chunks accepted (1 after AI repair)" in summary.render_artifact_report(artifact)
+    entry = ledger.entries()[f"Artifact.0:{task_id}"]
+    assert (entry["status"], entry["failure_count"]) == ("resolved", 1)
+    assert entry["resolution"]["by"] == "repair" and entry["repair"]["outcome"] == "repaired"
+    assert "PRIVATE" not in ledger.path.read_text()
+    assert checkpoint.payload["accepted"][task_id]["repair"]["outcome"] == "repaired"
+
+    resumed, _ledger, events, _prompts, calls, _failed = _repair_workload(
+        tmp_path, failing=[0], repair_output=REPAIRED_CHUNK,
+        chunk_recovery=recovery.ChunkRecovery(tmp_path / "recovery.json", "same", reuse=True),
+    )
+    assert events == [] and task_id not in calls
+    assert resumed["artifact_results"][0]["coverage"]["repaired_chunks"] == 1
+    assert line in resumed["artifact_results"][0]["limitations"]
+
+
+def test_failed_repair_counts_one_failure_and_the_cap_skips_later_chunks(tmp_path):
+    result, ledger, events, prompts, _calls, failed = _repair_workload(
+        tmp_path, failing=[0, 1], repair_output="DIAGNOSIS\tother\t-\tunsure\nEND", limit=1,
+    )
+    assert len(prompts) == 1
+    records = {item["task_id"]: item for item in result["tasks"] if item["task_id"] in failed}
+    outcomes = sorted(record["repair"]["outcome"] for record in records.values())
+    assert outcomes == ["failed", "skipped"]
+    skipped = next(record for record in records.values() if record["repair"]["outcome"] == "skipped")
+    assert (skipped["attempts"], skipped["repair"]["reason"]) == (3, "repair_limit_reached")
+    assert [kind for kind, *_rest in events].count("failed") == 2
+    entries = ledger.entries("failed")
+    assert {entry["failure_count"] for entry in entries.values()} == {1}
+    repaired_entry = next(entry for entry in entries.values() if entry["repair"]["outcome"] == "failed")
+    assert repaired_entry["attempts"] == 4
+    assert repaired_entry["attempt_history"][-1]["defects"] == [{"code": "repair_missing_body"}]
+    lines = [summary.failed_chunk_line(recovery.failed_chunk_summary(key, entry)) for key, entry in entries.items()]
+    assert any("An AI repair call also failed (other)." in line for line in lines)
+    assert any("AI repair was skipped: per-run repair limit reached." in line for line in lines)
+
+
+def test_repair_is_off_without_a_session_and_for_provider_failures(tmp_path):
+    rows = [{"When": "1", "Command": "x"}]
+    plan, chunks = runtime_fixtures.CollectionAnalysisRuntimeTest().build(
+        artifact_count=1, rows=rows, limit=10_000
+    )
+    seen = []
+
+    def execute(task):
+        seen.append(task.metadata.get("repair", False))
+        if task.metadata["stage"] == "chunk":
+            raise RuntimeError("Agent prompt exceeds maximum input tokens: 9 > 1\nPRIVATE detail")
+        return successful(task, synthesis_output(task))
+
+    with chunk_repair.session(4):
+        result = asyncio.run(runtime.execute_analysis_workload_async(
+            plan=plan, chunk_csv=chunks, question="q", spec=spec(), workdir=tmp_path,
+            output_dir=tmp_path, execute=execute, perform_scope_synthesis=False,
+        ))
+    [record] = [item for item in result["tasks"] if item["stage"] == "chunk"]
+    assert record["attempts"] == 1 and "repair" not in record and True not in seen
+    last = record["attempt_history"][-1]["run"]
+    assert last["error_classification"] == "input_limit"
+    assert last["error"] == "Agent prompt exceeds maximum input tokens: 9 > 1"
+    diagnostics = recovery.task_diagnostics(record)
+    assert diagnostics["attempt_history"][-1]["category"] == "input_limit"
+
+
+VALID_HUNT_CHUNK = (
+    "RESULT\tfindings\nFINDING\tF1\thigh\tExecution\tSuspicious event.\n"
+    "EVIDENCE\tF1\tS0001-R1\nEND"
+)
+
+
+def _hunt_chunk_work():
+    chunk = coordinator._streaming_chunk(
+        [{
+            "unit_id": "unit-1", "revision": "revision-1", "source_id": "source-1",
+            "segment_id": "segment-1", "artifact": "Artifact.Test",
+            "compatibility_key": "Artifact.Test/profile", "row_count": 1, "input_tokens": 10,
+            "rows": [{"_SourceRef": "S0001-R1", "Value": "one"}],
+        }],
+        analysis_id="analysis-1",
+    )
+    return next(iter(coordinator.iter_streaming_chunk_work(
+        [chunk],
+        source_aliases={"source-1": {
+            "alias": "S0001", "scope_type": "hunt", "scope_id": "H.1", "hunt_id": "H.1",
+            "org_id": "root", "artifact": "Artifact.Test", "source": "hunt_results",
+        }},
+        scope_type="hunt", scope_id="H.1", analysis_id="analysis-1",
+        question="What is suspicious?",
+        limits={
+            "model_context_tokens": 16_000, "operational_context_tokens": 12_000,
+            "maximum_input_tokens": 10_000, "maximum_output_tokens": 2_000,
+            "instruction_reserve_tokens": 1_000, "prior_context_reserve_tokens": 0,
+            "safety_reserve_tokens": 1_000, "maximum_evidence_tokens_per_item": 8_000,
+        },
+        encoding_name="cl100k_base",
+    )))
+
+
+def test_streaming_hunt_chunk_is_repaired_without_leaking_the_rejected_answer(tmp_path):
+    calls = []
+
+    class Runner:
+        def run(self, task, **_kwargs):
+            calls.append(bool(task.metadata.get("repair")))
+            output = (
+                "DIAGNOSIS\tinvalid_evidence_record\tL3\textra column\nREPAIRED\n" + VALID_HUNT_CHUNK
+                if task.metadata.get("repair")
+                else VALID_HUNT_CHUNK.replace("S0001-R1", "S0001-R1\tPRIVATE")
+            )
+            return AgentResult(
+                task_id=task.task_id, status="succeeded", output=output, output_file="",
+                events_file="", manifest_file="", elapsed_seconds=0.0,
+            )
+
+    with chunk_repair.session(4):
+        outcome = asyncio.run(coordinator._execute_streaming_chunk_work_async(
+            _hunt_chunk_work(), runner=Runner(), workdir=tmp_path, runtime_dir=tmp_path / ".api-runtime",
+        ))
+    assert calls == [False, False, False, True]
+    assert outcome["status"] == "accepted"
+    assert outcome["repair"]["outcome"] == "repaired"
+    assert outcome["repair"]["causes"] == [{"cause": "invalid_evidence_record", "location": "L3"}]
+    assert [item["status"] for item in outcome["attempt_failures"]] == ["retrying"] * 3
+    assert any("accepted after AI repair" in line for line in outcome["result"]["limitations"])
+    review = outcome["review"]
+    assert review["attempts"] == 4 and review["repair"]["outcome"] == "repaired"
+    assert "PRIVATE" not in json.dumps(review) and outcome["evidence"] is None
+
+    with chunk_repair.session(0):
+        unrepaired = asyncio.run(coordinator._execute_streaming_chunk_work_async(
+            _hunt_chunk_work(), runner=Runner(), workdir=tmp_path, runtime_dir=tmp_path / ".api-runtime",
+        ))
+    assert unrepaired["status"] == "failed" and "repair" not in unrepaired["review"]
+
+
+def test_resume_command_keeps_the_model_and_repair_settings():
+    from vraptor.hunt.command import parse_args
+
+    args = command.build_parser().parse_args([
+        "--client-id", "C.test", "--model", "fixture-model", "--max-output-tokens", "4000",
+        "--chunk-repair-limit", "0",
+    ])
+    resume = command.resume_analysis_command(args, {"client_id": "C.test", "request_id": "r1"})
+    assert "--model fixture-model" in resume and "--max-output-tokens 4000" in resume
+    assert "--chunk-repair-limit 0" in resume
+    assert parse_args(["analyze", "--id", "t", "--hunt-id", "H.t", "--chunk-repair-limit", "2"]).chunk_repair_limit == 2
+    with pytest.raises(SystemExit):
+        command.build_parser().parse_args(["--client-id", "C.test", "--chunk-repair-limit", "21"])
+
+
+class _HuntRunner:
+    """Breaks the first chunk it sees; the repair call returns a valid answer."""
+
+    def __init__(self):
+        self.calls, self.first = [], None
+
+    async def run(self, task, **_kwargs):
+        repairing = bool(task.metadata.get("repair"))
+        self.calls.append((task.metadata.get("stage"), task.task_id, repairing))
+        if task.metadata.get("stage") != "chunk":
+            output = synthesis_output(task)
+        else:
+            self.first = self.first or task.task_id
+            output = (
+                "DIAGNOSIS\tformat_drift\tL1\tnot a protocol record\nREPAIRED\n"
+                "RESULT\tno_reportable_findings\nEND"
+                if repairing
+                else "PRIVATE_MODEL_OUTPUT" if task.task_id == self.first
+                else "RESULT\tno_reportable_findings\nEND"
+            )
+        return AgentResult(
+            task_id=task.task_id, status="succeeded", output=output, output_file="",
+            events_file="", manifest_file="", elapsed_seconds=0.0,
+        )
+
+    async def close(self):
+        pass
+
+
+def _analyze_hunt(tmp_path, api, artifact, **kwargs):
+    from dataclasses import replace
+    from unittest import mock
+
+    import test_flow_analysis
+
+    runner = _HuntRunner()
+    with mock.patch.object(coordinator, "create_agent_runner", return_value=runner), \
+            mock.patch.object(coordinator.asyncio, "sleep", new=mock.AsyncMock()), \
+            chunk_repair.session(4) as policy:
+        result = coordinator.analyze_hunt_flows(
+            api, org_id="root", hunt_id="H.1", hunt_state="RUNNING",
+            reported_result_rows=sum(len(rows) for rows in api.rows.values()),
+            target_execution_coverage="partial", targeted_client_count=0,
+            question="What is suspicious?", hunt_root=tmp_path, selected_artifacts=[artifact],
+            limits=replace(test_flow_analysis.TEST_LIMITS, maximum_evidence_tokens_per_item=1_000),
+            spec=test_flow_analysis.FlowAnalysisTest().spec(), **kwargs,
+        )
+    state = json.loads((tmp_path / "analysis" / "hunt-analysis-state.json").read_text())
+    ledger = json.loads((tmp_path / "analysis" / coordinator.FAILED_CHUNKS_FILENAME).read_text())
+    return result, state["runs"][-1], ledger, runner, policy
+
+
+@pytest.mark.parametrize("synthesis_mode", ["full", "none"])
+def test_hunt_publishes_the_repair_label_and_logs_the_chunk(tmp_path, synthesis_mode):
+    from test_flow_analysis import FakeFlowApi, flow_row
+
+    rows = {
+        ("C.1", "F.1"): [{"Value": f"one {i} " + "alpha " * 300} for i in range(6)],
+        ("C.2", "F.2"): [{"Value": f"two {i} " + "beta " * 300} for i in range(6)],
+    }
+    api = FakeFlowApi([flow_row("C.1", "F.1"), flow_row("C.2", "F.2")], rows)
+    result, run, ledger, runner, _policy = _analyze_hunt(
+        tmp_path, api, "Artifact.Test", synthesis_mode=synthesis_mode,
+    )
+    [chunk_id] = run["repaired_chunk_ids"]
+    entry = ledger["chunks"][chunk_id]
+    assert (entry["status"], entry["resolution"]["by"], entry["failure_count"]) == ("resolved", "repair", 1)
+    assert "PRIVATE_MODEL_OUTPUT" not in json.dumps(ledger)
+    assert [call for call in runner.calls if call[2]]
+    published = result["analysis_result"]
+    [line] = [item for item in published["limitations"] if "accepted after AI repair" in item]
+    assert f"Key `{chunk_id}`" in line and "chunk 1/1" not in line
+    assert published["coverage"]["repaired_chunks"] == 1
+
+
+def test_detectraptor_partition_repair_is_logged(tmp_path):
+    from test_flow_analysis import FakeFlowApi, flow_row
+    from vraptor.analyze import flow_runtime
+    from vraptor.analyze import time_scope
+
+    artifact = flow_runtime.DETECTRAPTOR_EVTX_ARTIFACT
+    api = FakeFlowApi(
+        [flow_row("C.1", "F.1", artifact=artifact)],
+        {("C.1", "F.1"): [
+            {"Detection": {"Name": "Common"}, "EventTime": "2026-08-13T09:20:00Z"},
+            {"Detection": {"Name": "Rare"}, "EventTime": "2026-08-13T09:30:00Z"},
+            {"Detection": {"Name": "Common"}, "EventTime": "2026-08-13T09:40:00Z"},
+        ]},
+    )
+    _result, run, ledger, _runner, policy = _analyze_hunt(
+        tmp_path, api, artifact,
+        time_scope=time_scope.TimeScope.from_values(
+            after="2026-08-13T09:00:00Z", before="2026-08-13T10:00:00Z",
+        ),
+    )
+    assert policy.used == 1
+    [chunk_id] = run["repaired_chunk_ids"]
+    assert ledger["chunks"][chunk_id]["resolution"]["by"] == "repair"
+    assert ledger["chunks"][chunk_id]["artifact"] == artifact
+
+
+def _pending_then(ledger, key, repair, *, history_tail=(), evidence=None):
+    failure = _failure(key.split(":", 1)[1])
+    failure["attempt_history"].extend(history_tail)
+    ledger.record_failure(
+        key, {**failure, **({"repair": repair} if repair else {})},
+        identity={"artifact": "Artifact.0"}, budget={}, next_steps={}, evidence=evidence,
+    )
+
+
+def test_ledger_pairs_only_a_pending_record_with_its_own_repair_result(tmp_path):
+    ledger = recovery.FailedChunkLedger(tmp_path / "failed-chunks.json", SCOPE)
+    key = "Artifact.0:artifact-task-1-chunk-0"
+    timeout = {"attempt": 4, "status": "failed", "category": "timeout", "repair": True, "defects": [
+        {"code": "repair_missing_body"}]}
+    _pending_then(ledger, key, {"outcome": "pending"})
+    _pending_then(ledger, key, {"outcome": "failed", "attempt": 4, "findings_before": 0},
+                  history_tail=[timeout], evidence={"directory": "/case/debug/run1"})
+    entry = ledger.entries()[key]
+    assert entry["failure_count"] == 1
+    assert entry["final"]["category"] == "validation_failed"
+    assert entry["final"]["defect_codes"] == ["invalid_reference"]
+    assert entry["repair"]["category"] == "timeout"
+    assert "(timeout)" in summary.failed_chunk_line(recovery.failed_chunk_summary(key, entry))
+    # An interrupted repair leaves a pending record; the next run's failure is new.
+    _pending_then(ledger, key, {"outcome": "pending"})
+    _pending_then(ledger, key, None)
+    entry = ledger.entries()[key]
+    assert entry["failure_count"] == 3 and entry["evidence"] is None
+    _pending_then(ledger, key, {"outcome": "pending"})
+    ledger.resolve(key)
+    entry = ledger.entries()[key]
+    assert entry["resolution"] == {"by": "acceptance"} and "repair" not in entry
+
+
+def test_repair_prompt_separates_earlier_defects_and_must_fit_the_input_limit():
+    prompt = chunk_repair.render_repair_prompt(
+        "INPUT",
+        defects=[{"code": "invalid_context_type", "line": 4}],
+        earlier_defects=[{"code": "unsupported_tactic", "line": 7}],
+        previous_output="\n".join(f"line {index}" for index in range(1, 9)),
+        rejected_count=3,
+    )
+    assert '\nDEFECT\t{"code":"invalid_context_type","line":4}\n' in prompt
+    assert '\nEARLIER_DEFECT\t{"code":"unsupported_tactic"}\n' in prompt
+    arguments = dict(
+        defects=[{"code": "invalid_context_type", "line": 4}], earlier_defects=[],
+        previous_output="\n".join("x" * 50 for _ in range(40)), rejected_count=3,
+    )
+    full = chunk_repair.build_repair_prompt("INPUT", fits=None, **arguments)
+    assert "quoted 40 of 40 lines" in full
+    cited = chunk_repair.build_repair_prompt("INPUT", fits=lambda text: len(text) < len(full), **arguments)
+    assert "quoted 1 of 40 lines" in cited
+    assert chunk_repair.build_repair_prompt("INPUT", fits=lambda _text: False, **arguments) is None
+    fits = chunk_repair.input_fits(10, "cl100k_base")
+    assert fits("short") and not fits("word " * 50)
+    assert chunk_repair.input_fits(None, "cl100k_base") is None
+
+
+def test_repair_is_skipped_without_a_slot_when_the_prompt_cannot_fit(tmp_path, monkeypatch):
+    monkeypatch.setattr(chunk_repair, "input_fits", lambda *_args: lambda text: "REPAIR REVIEW" not in text)
+    result, ledger, events, prompts, _calls, [task_id] = _repair_workload(
+        tmp_path, failing=[0], repair_output=REPAIRED_CHUNK, limit=1,
+    )
+    assert prompts == [] and [kind for kind, *_rest in events] == ["failed"]
+    record = next(item for item in result["tasks"] if item["task_id"] == task_id)
+    assert (record["attempts"], record["repair"]["reason"]) == (3, "repair_prompt_too_large")
+    line = summary.failed_chunk_line(recovery.failed_chunk_summary(
+        f"Artifact.0:{task_id}", ledger.entries()[f"Artifact.0:{task_id}"]
+    ))
+    assert "AI repair was skipped: the repair prompt would exceed the input limit." in line
+
+
+def test_host_diagnosis_may_cite_only_the_chunk_references(tmp_path):
+    output = REPAIRED_CHUNK.replace(
+        "REPAIRED", "DIAGNOSIS\tother\tS2024-R7\tnot a chunk row\nREPAIRED"
+    )
+    result, _ledger, _events, _prompts, _calls, [task_id] = _repair_workload(
+        tmp_path, failing=[0], repair_output=output, command="net use \\\\FILESRV-S2024-R7\\share ",
+    )
+    record = next(item for item in result["tasks"] if item["task_id"] == task_id)
+    assert record["repair"]["diagnosis_status"] == "invalid"
+    assert {"cause": "other", "location": "-"} in record["repair"]["causes"]
+    assert "S2024-R7" not in json.dumps(result["artifact_results"])
+
+
+def test_shared_hunt_runner_applies_the_input_limit_to_the_repair_prompt(tmp_path):
+    import test_flow_analysis
+    from vraptor.common import token_budget
+
+    work = _hunt_chunk_work()
+    limits = {
+        "model_context_tokens": 16_000, "operational_context_tokens": 12_000,
+        "maximum_input_tokens": 10_000, "maximum_output_tokens": 2_000,
+    }
+    invalid = VALID_HUNT_CHUNK.replace("S0001-R1", "S0001-R1\tPRIVATE") + "\n" + "\n".join(
+        f"FINDING\tF{index}\thigh\tExecution\tfiller text for a long answer" for index in range(2, 1000)
+    )
+    sent = []
+
+    def shared_execute(task, *, limits, progress_callback=None):
+        tokens = token_budget.estimate_tokens(task.prompt, limits.token_encoding)
+        if tokens > limits.maximum_input_tokens:
+            raise RuntimeError(f"Agent prompt exceeds maximum input tokens ({tokens} > {limits.maximum_input_tokens}).")
+        sent.append(task.prompt)
+        output = (
+            "DIAGNOSIS\tinvalid_evidence_record\t-\textra column\nREPAIRED\n" + VALID_HUNT_CHUNK
+            if task.metadata.get("repair") else invalid
+        )
+        return AgentResult(
+            task_id=task.task_id, status="succeeded", output=output, output_file="",
+            events_file="", manifest_file="", elapsed_seconds=0.0,
+        )
+
+    with chunk_repair.session(4) as policy:
+        [outcome] = asyncio.run(coordinator.execute_streaming_chunks_async(
+            work_items=[work], limits=limits, encoding_name="cl100k_base",
+            spec=test_flow_analysis.FlowAnalysisTest().spec(), workdir=tmp_path,
+            runtime_dir=tmp_path / ".api-runtime", shared_execute=shared_execute,
+        ))
+    assert policy.used == 1 and outcome["status"] == "accepted"
+    [repair_prompt] = [prompt for prompt in sent if "REPAIR REVIEW" in prompt]
+    quoted, total = map(int, re.search(r"quoted ([0-9]+) of ([0-9]+) lines", repair_prompt).groups())
+    assert quoted < total == len(invalid.splitlines())

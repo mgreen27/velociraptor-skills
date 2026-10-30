@@ -171,6 +171,19 @@ class ChunkRecovery:
         }
         atomic_io.write_json_atomic(self.path, self.payload, sort_keys=True)
 
+    def mark_repaired(self, task: Any, repair: Any) -> None:
+        """Keep the repair label with the checkpoint so a resumed run still reports it."""
+        item = self.payload["accepted"].get(task.task_id)
+        if isinstance(item, dict) and item.get("input_sha256") == fingerprint(task.prompt):
+            item["repair"] = safe_repair(repair)
+            atomic_io.write_json_atomic(self.path, self.payload, sort_keys=True)
+
+    def repair(self, task: Any) -> dict:
+        item = self.payload["accepted"].get(task.task_id)
+        if isinstance(item, dict) and item.get("input_sha256") == fingerprint(task.prompt):
+            return safe_repair(item.get("repair"))
+        return {}
+
 
 def _non_negative_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
@@ -228,39 +241,79 @@ def _safe_diagnostic_value(key: str, value: Any) -> bool:
     )
 
 
+def safe_defects(raw_defects: list) -> list[dict]:
+    """Project validator diagnostics onto protocol vocabulary; model-supplied values are dropped."""
+    defects = []
+    for raw in raw_defects[:50]:
+        defect = {}
+        if raw.get("message") in VALIDATION_MESSAGES:
+            defect["message"] = raw["message"]
+        for key in (
+            "code",
+            "record",
+            "ref",
+            "candidate_id",
+            "finding_id",
+            "line",
+            "allowed",
+            "received", "missing", "reason",
+        ):
+            value = raw.get(key)
+            if _safe_diagnostic_value(key, value):
+                defect[key] = value
+            elif key in {"allowed", "received", "missing"} and isinstance(value, list):
+                defect[key] = [
+                    v
+                    for v in value[:50]
+                    if _safe_diagnostic_value(key, v)
+                ]
+        if defect:
+            defects.append(defect)
+    return defects
+
+
+_REPAIR_OUTCOMES = frozenset({"pending", "repaired", "failed", "unrepairable", "skipped"})
+
+
+def safe_repair(value: Any) -> dict:
+    """Keep a repair record's outcome, cause codes, locations and counts only."""
+    if not isinstance(value, dict) or value.get("outcome") not in _REPAIR_OUTCOMES:
+        return {}
+    result: dict[str, Any] = {"outcome": value["outcome"]}
+    for key in ("attempt", "findings_before", "findings_after"):
+        if _non_negative_int(value.get(key)):
+            result[key] = value[key]
+    for key in ("reason", "unrepairable_cause", "category"):
+        if _safe_diagnostic_value("code", value.get(key)):
+            result[key] = value[key]
+    if value.get("diagnosis_status") in {"valid", "invalid", "absent"}:
+        result["diagnosis_status"] = value["diagnosis_status"]
+    if isinstance(value.get("explanation_sha256"), str) and re.fullmatch(
+        r"[0-9a-f]{64}", value["explanation_sha256"]
+    ):
+        result["explanation_sha256"] = value["explanation_sha256"]
+    causes = []
+    for item in list(value.get("causes") or [])[:5]:
+        if not isinstance(item, dict) or not _safe_diagnostic_value("code", item.get("cause")):
+            continue
+        location = str(item.get("location") or "-")
+        if not (location == "-" or re.fullmatch(r"L[0-9]{1,6}", location)
+                or _safe_diagnostic_value("ref", location)):
+            location = "-"
+        causes.append({"cause": item["cause"], "location": location})
+    if causes:
+        result["causes"] = causes
+    return result
+
+
 def task_diagnostics(record: dict) -> dict:
     """No provider bodies, model text, source values, or arbitrary error messages."""
     attempts = []
     history = list(record.get("attempt_history", []))
     for item in history[:7]:
         run = item.get("run") or {}
-        defects = []
         raw_defects = list(item.get("diagnostics") or [])
-        for raw in raw_defects[:50]:
-            defect = {}
-            if raw.get("message") in VALIDATION_MESSAGES:
-                defect["message"] = raw["message"]
-            for key in (
-                "code",
-                "record",
-                "ref",
-                "candidate_id",
-                "finding_id",
-                "line",
-                "allowed",
-                "received", "missing", "reason",
-            ):
-                value = raw.get(key)
-                if _safe_diagnostic_value(key, value):
-                    defect[key] = value
-                elif key in {"allowed", "received", "missing"} and isinstance(value, list):
-                    defect[key] = [
-                        v
-                        for v in value[:50]
-                        if _safe_diagnostic_value(key, v)
-                    ]
-            if defect:
-                defects.append(defect)
+        defects = safe_defects(raw_defects)
         provider_status = str(run.get("status") or "")
         category = (
             "validation_failed"
@@ -278,6 +331,7 @@ def task_diagnostics(record: dict) -> dict:
             "authentication": "Provider authentication failed. Check credential availability without logging credentials.",
             "output_too_large": "The response exceeded the output budget. Reduce the requested detail or adjust the model-compatible output budget.",
             "output_limit_reached": "The provider stopped at the output-token limit. Reduce the requested detail or increase the model-compatible output budget.",
+            "input_limit": "The rendered prompt exceeds the input budget. Lower max_analysis_item_tokens or raise the model-compatible input budget.",
             "cancelled": "The analysis was cancelled. Confirm the stop reason before resuming the same request.",
             "succeeded": "The response passed validation.",
         }
@@ -285,6 +339,7 @@ def task_diagnostics(record: dict) -> dict:
             {
                 "attempt": item.get("attempt"),
                 "status": item.get("status"),
+                **({"repair": True} if item.get("repair") else {}),
                 "category": category,
                 "defects": defects,
                 "message": messages.get(
@@ -301,6 +356,7 @@ def task_diagnostics(record: dict) -> dict:
             }
         )
     inputs = _safe_inputs(record.get("inputs"))
+    repair = safe_repair(record.get("repair"))
     return {
         "task_id": record.get("task_id"),
         "stage": record.get("stage"),
@@ -309,6 +365,7 @@ def task_diagnostics(record: dict) -> dict:
         "coverage": record.get("coverage", {}),
         **({"inputs": inputs} if inputs else {}),
         "attempt_history": attempts,
+        **({"repair": repair} if repair else {}),
         **({"omitted_attempt_count": len(history) - 7} if len(history) > 7 else {}),
         "action": (
             "Correct the cited validation defects or check provider configuration; then use --retry-failed with the same request and question."
@@ -374,9 +431,25 @@ class FailedChunkLedger:
     ) -> None:
         """Store one task_diagnostics() record; never pass a raw task record."""
         history = list(diagnostics.get("attempt_history") or [])
-        last = dict(history[-1]) if history else {}
+        # The failure is the last rejected answer; an optional repair call's own
+        # category stays in the repair record.
+        last = next(
+            (dict(item) for item in reversed(history)
+             if item.get("status") != "accepted" and not item.get("repair")),
+            {},
+        )
+        repair = safe_repair(diagnostics.get("repair"))
+        repair_call = next((item for item in reversed(history) if item.get("repair")), {})
+        if repair and repair_call.get("status") != "accepted" and repair_call.get("category"):
+            repair = safe_repair({**repair, "category": repair_call["category"]})
         with self._lock:
             prior = dict(self.payload["chunks"].get(key) or {})
+            # Only a repair call's own result continues the pending record written
+            # just before it; any other record is a new failure.
+            same_event = (
+                dict(prior.get("repair") or {}).get("outcome") == "pending"
+                and repair.get("outcome") in {"failed", "unrepairable"}
+            )
             now = clock.now_utc()
             self.payload["chunks"][key] = {
                 **{
@@ -394,14 +467,15 @@ class FailedChunkLedger:
                     {**dict(diagnostics.get("coverage") or {}), **dict(diagnostics.get("inputs") or {})}
                 ),
                 "first_failed_at": prior.get("first_failed_at") or now,
-                "last_failed_at": now,
-                "failure_count": int(prior.get("failure_count") or 0) + 1,
+                "last_failed_at": prior["last_failed_at"] if same_event else now,
+                "failure_count": int(prior.get("failure_count") or 0) + (0 if same_event else 1),
                 "final": {
                     "category": last.get("category", "analysis_error"),
                     "defect_codes": sorted(
                         {
                             str(defect["code"])
                             for item in history
+                            if not item.get("repair")
                             for defect in item.get("defects") or []
                             if defect.get("code")
                         }
@@ -409,19 +483,29 @@ class FailedChunkLedger:
                     "message": last.get("message", ""),
                 },
                 "attempt_history": history,
-                "evidence": evidence,
+                **({"repair": repair} if repair else {}),
+                "evidence": prior.get("evidence") if evidence is None and same_event else evidence,
                 "decision": prior.get("decision"),
                 "next": dict(next_steps),
             }
             self._prune()
             self._save()
 
-    def resolve(self, key: str) -> None:
+    def resolve(self, key: str, repair: dict | None = None, evidence: dict | None = None) -> None:
+        """Mark a later acceptance; ``repair`` records an in-run AI repair."""
         with self._lock:
             entry = self.payload["chunks"].get(key)
             if entry and entry.get("status") != "resolved":
                 entry["status"] = "resolved"
                 entry["resolved_at"] = clock.now_utc()
+                resolution = safe_repair(repair)
+                entry["resolution"] = {"by": "repair", **resolution} if resolution else {"by": "acceptance"}
+                if resolution:
+                    entry["repair"] = resolution
+                elif dict(entry.get("repair") or {}).get("outcome") == "pending":
+                    entry.pop("repair")
+                if evidence is not None:
+                    entry["evidence"] = evidence
                 self._save()
 
     def supersede(self, artifact: str, current: set[str]) -> None:
@@ -522,4 +606,5 @@ def failed_chunk_summary(key: str, entry: dict) -> dict:
             if entry.get("status") == "waived"
             else {}
         ),
+        **({"repair": dict(entry["repair"])} if entry.get("repair") else {}),
     }
