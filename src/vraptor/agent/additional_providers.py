@@ -284,6 +284,7 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                 else None,
             )
             iterator = query(prompt=request.prompt, options=options)
+            api_stop = None
             try:
                 async for message in iterator:
                     if cancellation:
@@ -321,6 +322,9 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                         event = message.event
                         if event.get("type") in {"message_start", "message_delta"}:
                             request_id = str(_get(message, "session_id", request_id))
+                            api_stop = (event.get("delta") or {}).get(
+                                "stop_reason"
+                            ) or api_stop
                             usage = _message_usage_snapshot(known_usage, event)
                             if usage.status != "unavailable":
                                 self._emit(
@@ -355,22 +359,36 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                                 request_id=request_id, usage_status=usage.status,
                                 **usage.as_dict(),
                             )
+                        stop = getattr(message, "stop_reason", None)
                         if (
                             message.is_error
                             or message.subtype != "success"
                             or getattr(message, "permission_denials", None)
                         ):
+                            # Claude Code reports limit stops and refusals as
+                            # errors; the streamed message_delta keeps the API
+                            # stop reason.
+                            reported = stop if stop == "refusal" else api_stop
+                            classification = (
+                                _STOP_CLASSIFICATIONS.get(reported)
+                                if message.subtype == "success"
+                                and not getattr(message, "permission_denials", None)
+                                else None
+                            )
                             raise AgentProviderException(
                                 AgentError(
-                                    "incomplete_response",
+                                    classification or "incomplete_response",
                                     "Claude SDK did not complete analysis",
                                     False,
                                     request_id=request_id,
                                     usage=usage,
-                                    finish_reason=str(_get(message, "stop_reason") or message.subtype),
+                                    finish_reason=str(
+                                        reported
+                                        if classification
+                                        else stop or message.subtype
+                                    ),
                                 )
                             )
-                        stop = getattr(message, "stop_reason", None)
                         if stop not in {None, "end_turn"}:
                             classification = _STOP_CLASSIFICATIONS.get(
                                 stop, "incomplete_response"

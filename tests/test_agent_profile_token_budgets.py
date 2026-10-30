@@ -212,8 +212,44 @@ def test_model_catalog_entries_are_consistent(provider):
         # Every listed model has a known effort ladder, possibly empty.
         assert effort_levels(provider, name) is not None
     for alias, target in model_aliases(provider).items():
+        assert alias == alias.lower()
         assert target in ids
         assert model_budget(provider, alias).alias_reference_model == target
+
+
+def test_claude_code_route_limits_are_consistent():
+    for item in load_model_catalog()["providers"]["anthropic"]["models"]:
+        budget = model_budget("anthropic", item["id"], "claude_agent_sdk")
+        assert budget.max_input_tokens >= MIN_INPUT_TOKENS
+        assert MIN_OUTPUT_TOKENS <= budget.default_output_tokens
+        assert budget.default_output_tokens <= budget.max_output_tokens
+        assert budget.claude_code_limited == ("claude_code" in item)
+
+
+@pytest.mark.parametrize("model", ["claude-opus-4-6", "claude-sonnet-4-6"])
+def test_claude_code_runs_4_6_at_200k_without_1m_variant(model):
+    api = model_budget("anthropic", model)
+    sdk = model_budget("anthropic", model, "claude_agent_sdk")
+    extended = model_budget("anthropic", f"{model}[1m]", "claude_agent_sdk")
+    assert (api.context_tokens, api.default_input_tokens) == (1000000, 872000)
+    assert (sdk.context_tokens, sdk.default_input_tokens) == (200000, 120000)
+    assert (sdk.default_output_tokens, sdk.max_input_tokens) == (64000, 136000)
+    assert extended.public_dict() == api.public_dict()
+    # The [1m] suffix is a Claude Code model name, not an API model ID.
+    assert model_budget("anthropic", f"{model}[1m]") is None
+
+
+@pytest.mark.parametrize(
+    "model,target,levels",
+    [
+        ("Opus", "claude-opus-5-5", ("low", "medium", "high", "xhigh", "max")),
+        ("Sonnet[1M]", "claude-sonnet-5-5", ("low", "medium", "high", "xhigh", "max")),
+        ("HAIKU", "claude-haiku-5-5", ("low", "medium", "high", "xhigh", "max")),
+    ],
+)
+def test_claude_aliases_match_without_case(model, target, levels):
+    assert model_budget("anthropic", model).alias_reference_model == target
+    assert effort_levels("anthropic", model) == levels
 
 
 @pytest.mark.parametrize(
@@ -491,6 +527,32 @@ def test_switching_claude_alias_to_haiku_4_5_clears_stale_limits_and_effort(
     profile = sources.read_config(path)["profiles"]["anthropic"]
     assert profile["model"] == "claude-haiku-4-5"
     assert "reasoning_effort" not in profile
+
+
+@pytest.mark.parametrize("previous", ["claude-haiku-4-5", None])
+def test_saved_reference_limits_follow_model_change(tmp_path, previous):
+    path = tmp_path / "agents.toml"
+    if previous:
+        setup(path, "anthropic", "--model", previous)
+    else:
+        # A haiku profile saved while the alias named Haiku 4.5.
+        document(
+            path,
+            {
+                "provider": "anthropic",
+                "model": "haiku",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "model_context_tokens": 200000,
+                "model_max_output_tokens": 64000,
+                "max_input_tokens": 120000,
+                "max_output_tokens": 64000,
+            },
+        )
+    report = setup(path, "anthropic", "--model", "haiku")
+    effective = report["analysis_limits"]["effective"]
+    assert effective["model_context_tokens"] == 1000000
+    assert effective["maximum_output_tokens"] == 128000
+    assert effective["maximum_input_tokens"] == 100000
 
 
 @pytest.mark.parametrize("model", ["sonnet", "opus", "fable"])

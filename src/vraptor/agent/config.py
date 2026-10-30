@@ -1322,6 +1322,33 @@ def resolve_unresolved_agent_route(
                 kind="model_capability",
                 name=f"{effort_label(provider, model)} does not support effort",
             )
+        levels = (
+            effort_levels(provider, model)
+            if provider == "anthropic" and transport != "claude_agent_sdk"
+            else None
+        )
+        effort = values["reasoning_effort"]
+        if levels and effort and effort not in levels:
+            # The Messages API rejects an unsupported level; Claude Code lowers
+            # it. Reject a run override; lower an inherited setting the same way.
+            if provenance["reasoning_effort"].kind == "cli":
+                raise RuntimeError(
+                    f"{effort_label(provider, model)} supports reasoning effort "
+                    + ", ".join(levels)
+                )
+            order = ("low", "medium", "high", "xhigh", "max")
+            values["reasoning_effort"] = next(
+                (
+                    level
+                    for level in reversed(order[: order.index(effort) + 1])
+                    if level in levels
+                ),
+                levels[0],
+            )
+            provenance["reasoning_effort"] = SourceProvenance(
+                kind="model_capability",
+                name=f"{effort_label(provider, model)} highest effort up to {effort}",
+            )
         key = (
             str(key_candidate.value)
             if key_candidate

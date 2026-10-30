@@ -398,13 +398,19 @@ def test_effort_options_precede_prompt_and_preserve_saved_values(
     assert profile.get("reasoning_effort") == ("low" if saved_effort else None)
 
 
-def test_claude_code_keeps_effort_it_lowers_itself(tmp_path):
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--from-harness", "claude_code"],
+        ["--from-harness", "claude_code", "--transport", "claude_agent_sdk"],
+    ],
+)
+def test_claude_code_keeps_effort_it_lowers_itself(tmp_path, flags):
     # Claude Code runs an unsupported level as the highest supported one.
     report = manage.setup(
         setup_args(
             tmp_path,
-            "--from-harness",
-            "claude_code",
+            *flags,
             "--model",
             "claude-opus-4-6",
             "--reasoning-effort",
@@ -415,6 +421,52 @@ def test_claude_code_keeps_effort_it_lowers_itself(tmp_path):
         report["execution_profile"]
     ]
     assert profile["reasoning_effort"] == "xhigh"
+
+
+@pytest.mark.parametrize(
+    "model,transport,expected",
+    [
+        ("claude-opus-4-6", "claude_agent_sdk", (200000, 120000, 64000)),
+        ("claude-opus-4-6[1m]", "claude_agent_sdk", (1000000, 872000, 128000)),
+        ("claude-opus-4-6", "api", (1000000, 872000, 128000)),
+    ],
+)
+def test_claude_code_route_uses_its_context_window(tmp_path, model, transport, expected):
+    report = manage.setup(
+        setup_args(
+            tmp_path,
+            "--from-harness",
+            "claude_code",
+            "--transport",
+            transport,
+            "--model",
+            model,
+        )
+    )
+    effective = report["analysis_limits"]["effective"]
+    assert (
+        effective["model_context_tokens"],
+        effective["maximum_input_tokens"],
+        effective["maximum_output_tokens"],
+    ) == expected
+
+
+def test_claude_code_import_on_api_transport_checks_effort_ladder(tmp_path):
+    with pytest.raises(RuntimeError, match="supports reasoning effort low, medium"):
+        manage.setup(
+            setup_args(
+                tmp_path,
+                "--from-harness",
+                "claude_code",
+                "--transport",
+                "api",
+                "--model",
+                "claude-opus-4-6",
+                "--reasoning-effort",
+                "xhigh",
+            )
+        )
+    assert not (tmp_path / "analyst.toml").exists()
 
 
 @pytest.mark.parametrize("managed", [False, True])

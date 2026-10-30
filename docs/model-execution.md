@@ -111,8 +111,10 @@ Claude API and Claude Code profiles accept `low`, `medium`, `high`, `xhigh`, `ma
 The selected model must support the value: Fable 5/5.1, Opus 5/5.5, Sonnet 5/5.5,
 Haiku 5.5 and Opus 4.7/4.8 support all five; Opus/Sonnet 4.6 support `low`,
 `medium`, `high`, `max`; Opus 4.5 supports `low`, `medium`, `high`. Haiku 4.5 does
-not expose effort, so leave it unset. Direct API setup rejects a level the listed
-model lacks; Claude Code lowers it to the highest supported level. Enter preserves saved settings; displaying the helper
+not expose effort, so leave it unset. On the direct API route, setup and a run's
+`--reasoning-effort` reject a level the listed model lacks, and an inherited level
+(for example after a run's `--model` switches model) is lowered to the highest
+supported one, as Claude Code does for its route. Enter preserves saved settings; displaying the helper
 does not alter them. Recognized effort-capable Claude models default to `medium`
 only when CLI, profile, shared and native settings supply no effort. This applies
 to interactive and non-interactive setup, including inherited Claude models.
@@ -256,6 +258,7 @@ references checked **2026-10-30** cover the exact IDs in the model catalog:
 | Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and the listed earlier 1M models | 1000000 context | 128000 | 128000 | 872000 |
 | Claude Haiku 5.5 `claude-haiku-5-5` | 100000 | 128000 | 128000 | 100000 |
 | Claude Haiku 4.5 `claude-haiku-4-5`, `claude-haiku-4-5-20251001` | 200000 context | 64000 | 64000 | 120000 |
+| Claude Opus/Sonnet 4.6 on the Claude Code route, without `[1m]` | 200000 context | 128000 | 64000 | 120000 |
 
 [OpenAI model specifications](https://developers.openai.com/api/docs/models/gpt-6-sol)
 describe the surcharge above 272K input.
@@ -266,7 +269,11 @@ prompts over 100000 tokens, cache reads and writes included, use its higher rate
 Input capacity is `min(model context - selected output, standard-price input ceiling)`;
 Sonnet's default is `1000000 - 128000 = 872000`. More tokens still cost more at the
 same per-token rate. Haiku 4.5 defaults to 64000 output and 120000 input, below the
-`200000 - 64000 = 136000` that explicit input `max` permits. Budgets are local
+`200000 - 64000 = 136000` that explicit input `max` permits. Claude Code runs
+`claude-opus-4-6` and `claude-sonnet-4-6` at 200K, so Claude Code profiles use the
+same 64000 / 120000 defaults for them; `claude-opus-4-6[1m]` or
+`claude-sonnet-4-6[1m]` selects the 1M window where the plan allows it
+([model configuration](https://code.claude.com/docs/en/model-config)). Budgets are local
 o200k estimates: Claude counts the same text as roughly 1.15–1.35 times as many
 tokens, more for code-like evidence such as hashes and paths, so a full budget can
 exceed a Claude context window or Haiku 5.5's 100000 price tier. The JSON reference reports `default_input_tokens`
@@ -280,7 +287,11 @@ context is recorded as `model_context_tokens` for
 new and existing profiles so the generic 400K application fallback cannot silently
 restrict them. Setup also records `model_max_output_tokens`; output `max` can never
 expand to nearly the whole context for these models. Smaller explicitly configured
-context/output caps remain in force and are displayed.
+context/output caps remain in force and are displayed. A saved pair that matches a
+listed model's reference (for example 200000 / 64000 saved while `haiku` named
+Haiku 4.5) is treated as setup-recorded and refreshed for the selected model; pass
+`--model-context-tokens` and `--model-max-output-tokens` on each setup run to keep
+such a pair as a deployment cap.
 
 Claude aliases `haiku`, `sonnet`, `opus`, and `fable` use dated offline references
 for the default Anthropic-hosted models (checked **2026-10-30**): Haiku 5.5,

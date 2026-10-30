@@ -5,7 +5,7 @@ deployment names are accepted; they keep saved or application budgets.
 """
 
 import tomllib
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 
 from vraptor.resources import resource_root
@@ -27,6 +27,7 @@ class ModelBudget:
     output_budget_tokens: int | None = None
     input_budget_tokens: int | None = None
     alias_reference_model: str | None = None
+    claude_code_limited: bool = False
 
     @property
     def default_output_tokens(self) -> int:
@@ -78,9 +79,14 @@ def model_examples(provider: str) -> tuple[tuple[str, str], ...]:
     )
 
 
+def _alias_target(entry: dict, model: str) -> str | None:
+    # Alias keys are lowercase; match Opus or Sonnet[1M] as well.
+    return entry.get("aliases", {}).get(model.lower())
+
+
 def _effort_family(provider: str, model: str) -> dict | None:
     entry = _provider(provider)
-    selected = entry.get("aliases", {}).get(model, model).lower()
+    selected = (_alias_target(entry, model) or model).lower()
     for family in entry.get("efforts", ()):
         if selected in family.get("ids", ()) or selected.startswith(
             tuple(family.get("prefixes", ()))
@@ -114,24 +120,44 @@ def effort_summary(provider: str) -> list[str]:
     ]
 
 
-def model_budget(provider: str, model: str) -> ModelBudget | None:
+def model_budget(provider: str, model: str, protocol: str = "") -> ModelBudget | None:
     # Only exact catalog IDs and the listed aliases have offline references.
     # Never infer a model from an arbitrary deployment name or future snapshot.
     entry = _provider(provider)
-    alias_target = entry.get("aliases", {}).get(model)
+    alias_target = _alias_target(entry, model)
     selected = alias_target or model
+    claude_code = protocol == "claude_agent_sdk"
+    extended = claude_code and selected.lower().endswith("[1m]")
+    if extended:
+        # Claude Code selects the 1M window of claude-opus-4-6[1m] and similar.
+        selected = selected[: -len("[1m]")]
     for item in entry.get("models", ()):
         if selected != item["id"] and selected not in item.get("snapshots", ()):
             continue
-        budget = ModelBudget(
-            item["context_tokens"],
-            item["standard_price_input_ceiling"],
-            item["max_output_tokens"],
+        limited = claude_code and not extended and "claude_code" in item
+        limits = {**item, **item["claude_code"]} if limited else item
+        return ModelBudget(
+            limits["context_tokens"],
+            limits["standard_price_input_ceiling"],
+            limits["max_output_tokens"],
             entry["source"].format(model=item["id"]),
             entry["pricing_source"].format(model=item["id"]),
             load_model_catalog()["checked"],
-            output_budget_tokens=item.get("output_budget_tokens"),
-            input_budget_tokens=item.get("input_budget_tokens"),
+            output_budget_tokens=limits.get("output_budget_tokens"),
+            input_budget_tokens=limits.get("input_budget_tokens"),
+            alias_reference_model=alias_target,
+            claude_code_limited=limited,
         )
-        return replace(budget, alias_reference_model=alias_target) if alias_target else budget
     return None
+
+
+def captured_envelopes(provider: str) -> set[tuple[int, int]]:
+    """Context/output pairs that setup saves for listed models on any route."""
+    pairs = set()
+    for item in _provider(provider).get("models", ()):
+        for limits in (item, {**item, **item.get("claude_code", {})}):
+            context = limits["context_tokens"]
+            pairs.add(
+                (context, min(context - MIN_INPUT_TOKENS, limits["max_output_tokens"]))
+            )
+    return pairs

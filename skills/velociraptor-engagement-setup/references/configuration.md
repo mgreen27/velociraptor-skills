@@ -163,7 +163,9 @@ the resolved values and sources with `vraptor ai config`.
   explicit smaller deployment caps.
 - New OpenAI/Azure profiles suggest 272000 / 128000, deriving 400000 context and
   keeping the shared 200000 evidence ceiling.
-- Unknown IDs/custom deployments/short harness aliases show unverified limits and
+- Listed Claude aliases (`opus`, `sonnet`, `haiku`, `fable`, `best`) use the
+  reference limits of the model they currently name, and setup names that
+  reference model. Unknown IDs and custom deployments show unverified limits and
   use saved/application fallbacks. Do not treat these offline API references as
   account discovery or managed-plan price guarantees.
 - Setup selects output first and shows the exact remaining input maximum. `max`

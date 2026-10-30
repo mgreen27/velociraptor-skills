@@ -9,6 +9,8 @@
 #          An empty ladder means the model takes no effort setting. Unmatched
 #          models keep free-form effort input. `adaptive_thinking = false`
 #          sends Claude effort without adaptive thinking.
+# claude_code: limits that replace the API figures on the Claude Code route
+#          unless the model ID ends in `[1m]`.
 checked = "2026-10-30"
 
 [providers.openai]
@@ -199,12 +201,18 @@ id = "claude-opus-4-6"
 context_tokens = 1000000
 standard_price_input_ceiling = 1000000
 max_output_tokens = 128000
+# Claude Code runs this model at 200K unless `[1m]` is selected; that variant
+# depends on the plan (https://code.claude.com/docs/en/model-config).
+claude_code = { context_tokens = 200000, standard_price_input_ceiling = 200000, output_budget_tokens = 64000, input_budget_tokens = 120000 }
 
 [[providers.anthropic.models]]
 id = "claude-sonnet-4-6"
 context_tokens = 1000000
 standard_price_input_ceiling = 1000000
 max_output_tokens = 128000
+# Claude Code runs this model at 200K unless `[1m]` is selected; that variant
+# depends on the plan (https://code.claude.com/docs/en/model-config).
+claude_code = { context_tokens = 200000, standard_price_input_ceiling = 200000, output_budget_tokens = 64000, input_budget_tokens = 120000 }
 
 [[providers.anthropic.models]]
 id = "claude-haiku-4-5"

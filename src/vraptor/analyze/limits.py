@@ -518,7 +518,7 @@ def resolve_analysis_limits(
                 allow_missing_credentials=True,
             )
         route = selected_execution.route
-        reference = model_budget(route.provider, route.model)
+        reference = model_budget(route.provider, route.model, route.protocol)
         context = route.model_context_tokens or (reference.context_tokens if reference else 0)
         output_cap = route.model_max_output_tokens or (reference.max_output_tokens if reference else 0)
         if not context or not output_cap:

@@ -204,6 +204,54 @@ def test_haiku_alias_run_override_keeps_effort(tmp_path):
     assert result.maximum_input_tokens == 100000
 
 
+@pytest.mark.parametrize(
+    "model,effort,levels",
+    [
+        ("claude-opus-4-6", "xhigh", "low, medium, high, max"),
+        ("claude-opus-4-5", "max", "low, medium, high"),
+    ],
+)
+def test_run_override_rejects_effort_outside_model_ladder(tmp_path, model, effort, levels):
+    path = configuration(tmp_path)
+    with pytest.raises(RuntimeError, match=f"supports reasoning effort {levels}$"):
+        resolve(path, "--model", model, "--reasoning-effort", effort)
+
+
+@pytest.mark.parametrize(
+    "model,saved,expected",
+    [
+        ("claude-opus-4-6", "xhigh", "high"),
+        ("claude-opus-4-6", "max", "max"),
+        ("claude-opus-4-5", "max", "high"),
+        ("claude-opus-5-5", "xhigh", "xhigh"),
+    ],
+)
+def test_model_switch_lowers_inherited_effort_to_ladder(tmp_path, model, saved, expected):
+    path = configuration(tmp_path, reasoning_effort=saved)
+    execution, _ = resolve(path, "--model", model)
+    assert execution.route.reasoning_effort == expected
+    source = execution.route.field_sources["reasoning_effort"]
+    assert (source.kind == "model_capability") == (saved != expected)
+
+
+def test_claude_code_transport_keeps_effort_it_lowers_itself(tmp_path):
+    path = configuration(
+        tmp_path, transport="claude_agent_sdk", reasoning_effort="xhigh"
+    )
+    execution, _ = resolve(path, "--model", "claude-opus-4-6")
+    assert execution.route.protocol == "claude_agent_sdk"
+    assert execution.route.reasoning_effort == "xhigh"
+
+
+@pytest.mark.parametrize(
+    "transport,maximum", [("claude_agent_sdk", 168000), ("api", 968000)]
+)
+def test_claude_code_route_bounds_4_6_input_to_200k(tmp_path, transport, maximum):
+    path = configuration(tmp_path, model="claude-opus-4-6", transport=transport)
+    _, result = resolve(path, "--max-input-tokens", "max")
+    assert result.maximum_input_tokens == maximum
+
+
 def test_haiku_5_5_input_cannot_exceed_standard_price_tier(tmp_path):
     path = configuration(tmp_path, model="claude-haiku-5-5")
     with pytest.raises(ValueError, match="between 100000 and 100000"):

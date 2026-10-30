@@ -20,6 +20,7 @@ from vraptor.agent.config import REPO_ROOT, resolve_agent_execution
 from vraptor.agent.model_budgets import (
     MIN_INPUT_TOKENS,
     MIN_OUTPUT_TOKENS,
+    captured_envelopes,
     effort_label,
     effort_levels,
     effort_summary,
@@ -783,6 +784,10 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         else None
     )
     selected_model = model or native_model or ""
+    transport = profile.get("transport")
+    runs_sdk = transport == "claude_agent_sdk" or (
+        transport == "auto" and args.from_harness == "claude_code"
+    )
     no_effort = provider == "anthropic" and effort_levels(provider, selected_model) == ()
     no_effort_error = (
         f"{effort_label(provider, selected_model)} does not support a reasoning-effort setting"
@@ -816,7 +821,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         # The Messages API rejects an unsupported level; Claude Code lowers it.
         levels = (
             effort_levels(provider, selected_model)
-            if provider == "anthropic" and not args.from_harness
+            if provider == "anthropic" and not runs_sdk
             else None
         )
         if effort and levels and effort not in levels:
@@ -844,6 +849,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     profiles[name] = profile
     budget_model = model
     budget_provider = provider
+    budget_protocol = "claude_agent_sdk" if runs_sdk else ""
     if not budget_model and args.from_harness:
         # Use the real resolver for inherited native models (including named
         # Codex profiles), without login, discovery requests, or inference.
@@ -858,7 +864,8 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
             )
             budget_model = preview.route.model
             budget_provider = preview.route.provider
-    reference = model_budget(budget_provider, budget_model or "")
+            budget_protocol = preview.route.protocol
+    reference = model_budget(budget_provider, budget_model or "", budget_protocol)
     reference_report = {
         "model": budget_model,
         "known": reference is not None,
@@ -875,6 +882,12 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                 print(
                     f"  Default alias budget reference: {reference.alias_reference_model}.\n"
                     "  Alias resolution is not verified; for remapped aliases select the exact model ID or configure smaller deployment caps.",
+                    file=sys.stderr,
+                )
+            if reference.claude_code_limited:
+                print(
+                    f"  Claude Code runs {budget_model} at {reference.context_tokens:,} tokens;\n"
+                    f"  {budget_model}[1m] selects 1M where the plan allows it.",
                     file=sys.stderr,
                 )
             print(
@@ -903,6 +916,20 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
                 "  Model limits/pricing unverified; using saved values or application defaults.\n",
                 file=sys.stderr,
             )
+    saved_envelope = (
+        profile.get("model_context_tokens"),
+        profile.get("model_max_output_tokens"),
+    )
+    if (
+        reference
+        and args.model_context_tokens is None
+        and args.model_max_output_tokens is None
+        and saved_envelope in captured_envelopes(budget_provider)
+    ):
+        # Setup saved these for a listed model (perhaps another one, or an
+        # alias's earlier target); they are not deployment caps.
+        profile.pop("model_context_tokens")
+        profile.pop("model_max_output_tokens")
     configured_context = profile.get(
         "model_context_tokens", defaults.get("model_context_tokens")
     )

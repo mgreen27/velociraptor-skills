@@ -357,6 +357,62 @@ def test_claude_sdk_rejects_incomplete_success_result(stop, classification):
     assert raised.value.error.request_id == "test-session"
 
 
+@pytest.mark.parametrize(
+    "api_stop,result_stop,classification",
+    [
+        ("max_tokens", "stop_sequence", "output_limit_reached"),
+        ("model_context_window_exceeded", "stop_sequence", "context_window_exceeded"),
+        ("refusal", "refusal", "refusal"),
+        (None, "refusal", "refusal"),
+        (None, "stop_sequence", "incomplete_response"),
+    ],
+)
+def test_claude_sdk_classifies_cli_error_results(api_stop, result_stop, classification):
+    # Claude Code reports these stops as is_error results; the streamed
+    # message_delta carries the API stop reason.
+    pytest.importorskip("claude_agent_sdk")
+    from claude_agent_sdk import ResultMessage
+    from claude_agent_sdk.types import StreamEvent
+
+    async def query(**kwargs):
+        if api_stop:
+            yield StreamEvent(
+                uuid="delta",
+                session_id="test-session",
+                event={
+                    "type": "message_delta",
+                    "delta": {"stop_reason": api_stop, "stop_sequence": None},
+                    "usage": {"output_tokens": 2},
+                },
+            )
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=True,
+            num_turns=1,
+            session_id="test-session",
+            result="partial",
+            stop_reason=result_stop,
+        )
+
+    async def run():
+        return await ClaudeAgentSDKAdapter(
+            execution("anthropic", "claude_agent_sdk"), TimeoutPolicy()
+        ).execute(request())
+
+    with (
+        mock.patch("claude_agent_sdk.query", query),
+        pytest.raises(AgentProviderException) as raised,
+    ):
+        asyncio.run(run())
+    assert raised.value.error.classification == classification
+    expected = result_stop if classification == "incomplete_response" else (
+        api_stop or result_stop
+    )
+    assert raised.value.error.finish_reason == expected
+
+
 def test_anthropic_unexpected_action_preserves_usage():
     adapter = AnthropicMessagesAdapter(execution("anthropic", "messages"), TimeoutPolicy())
     with pytest.raises(AgentProviderException) as raised:

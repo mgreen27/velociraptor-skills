@@ -94,7 +94,7 @@ def resolve(args, *, resolver=None, allow_missing_credentials=False):
         cli_values=cli, allow_missing_credentials=allow_missing_credentials
     )
     route = execution.route
-    reference = model_budget(route.provider, route.model)
+    reference = model_budget(route.provider, route.model, route.protocol)
     # Superseded environment values must not fail validation before CLI values
     # are applied. Resolve unchanged fields first; validate the final pair below.
     preliminary = dict(route.analysis_profile)
