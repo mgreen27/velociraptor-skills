@@ -66,11 +66,16 @@ def resolve(path, *flags):
         ("anthropic", "claude-sonnet-5", "max", 872000),
         ("anthropic", "claude-sonnet-5", "32000", 968000),
         ("anthropic", "claude-haiku-4-5-20251001", "max", 136000),
-        ("anthropic", "haiku", "max", 136000),
+        # Haiku 5.5 (the haiku alias) caps max at its 100000 standard-price tier.
+        ("anthropic", "claude-haiku-5-5", "max", 100000),
+        ("anthropic", "haiku", "max", 100000),
+        ("anthropic", "claude-sonnet-5-5", "max", 872000),
         ("anthropic", "sonnet", "max", 872000),
         ("anthropic", "opus", "max", 872000),
         ("anthropic", "fable", "max", 872000),
         ("openai", "gpt-6-sol", "max", 272000),
+        ("openai", "gpt-6.1-sol", "max", 272000),
+        ("openai", "gpt-6.1-terra", "max", 272000),
     ],
 )
 def test_maximum_uses_selected_model_and_output(
@@ -82,7 +87,7 @@ def test_maximum_uses_selected_model_and_output(
     )
     assert result.maximum_input_tokens == input_tokens
     expected_output = (
-        32000 if output == "32000" else (64000 if "haiku" in model else 128000)
+        32000 if output == "32000" else (64000 if "haiku-4-5" in model else 128000)
     )
     assert result.maximum_output_tokens == expected_output
     assert result.operational_context_tokens == input_tokens + expected_output
@@ -120,16 +125,17 @@ def test_published_maximum_can_override_saved_deployment_caps(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "model,context,output",
+    "model,context,output,input_tokens",
     [
-        ("haiku", 200000, 64000),
-        ("sonnet", 1000000, 128000),
-        ("opus", 1000000, 128000),
-        ("fable", 1000000, 128000),
+        ("haiku", 1000000, 128000, 100000),
+        ("claude-haiku-4-5", 200000, 64000, 136000),
+        ("sonnet", 1000000, 128000, 872000),
+        ("opus", 1000000, 128000, 872000),
+        ("fable", 1000000, 128000, 872000),
     ],
 )
 def test_alias_run_override_bounds_stale_saved_caps_without_mutation(
-    tmp_path, model, context, output
+    tmp_path, model, context, output, input_tokens
 ):
     path = configuration(
         tmp_path, model_context_tokens=2000000, model_max_output_tokens=999990
@@ -146,7 +152,7 @@ def test_alias_run_override_bounds_stale_saved_caps_without_mutation(
     assert execution.route.model == model
     assert result.model_context_tokens == context
     assert result.maximum_output_tokens == output
-    assert result.maximum_input_tokens == context - output
+    assert result.maximum_input_tokens == input_tokens
 
 
 @pytest.mark.parametrize("environment_input", ["110000", "2000000", "invalid"])

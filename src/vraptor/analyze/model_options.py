@@ -56,7 +56,7 @@ def add_arguments(parser):
         ),
         (
             "max_output_tokens",
-            "Output budget; minimum 32000. max uses the model/deployment output maximum (including 64000 for Haiku).",
+            "Output budget; minimum 32000. max uses the model/deployment output maximum (64000 for Haiku 4.5).",
         ),
         (
             "model_context_tokens",

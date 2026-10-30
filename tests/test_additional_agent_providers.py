@@ -103,6 +103,30 @@ def test_anthropic_real_sdk_terminal_contract(tmp_path, stop, expected, effort):
     assert (tmp_path / "result.txt").exists() == (expected == "succeeded")
 
 
+@pytest.mark.parametrize(
+    "model,thinking",
+    [
+        ("claude-opus-5-5", {"type": "adaptive"}),
+        ("claude-haiku-5-5", {"type": "adaptive"}),
+        ("custom-claude", {"type": "adaptive"}),
+        # Adaptive thinking starts with Claude 4.6.
+        ("claude-opus-4-5-20251101", None),
+    ],
+)
+def test_anthropic_effort_sends_adaptive_thinking_only_where_supported(
+    model, thinking
+):
+    selected = execution("anthropic", "messages")
+    selected = replace(
+        selected, route=replace(selected.route, model=model, reasoning_effort="low")
+    )
+    options = AnthropicMessagesAdapter(
+        selected, TimeoutPolicy(), client=object()
+    )._request_options(request())
+    assert options.get("thinking") == thinking
+    assert options["output_config"]["effort"] == "low"
+
+
 @pytest.mark.parametrize("effort", ["", "low", "medium", "high", "xhigh", "max"])
 def test_claude_sdk_uses_real_options_with_mocked_execution(effort, monkeypatch):
     ResultMessage = pytest.importorskip("claude_agent_sdk").ResultMessage

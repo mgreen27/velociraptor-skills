@@ -20,7 +20,12 @@ from vraptor.agent.config import REPO_ROOT, resolve_agent_execution
 from vraptor.agent.model_budgets import (
     MIN_INPUT_TOKENS,
     MIN_OUTPUT_TOKENS,
+    effort_label,
+    effort_levels,
+    effort_summary,
+    model_aliases,
     model_budget,
+    model_examples,
 )
 from vraptor.agent.registry import PROVIDERS
 from vraptor.agent.sources import (
@@ -35,42 +40,21 @@ from vraptor.common.atomic_io import write_bytes_atomic
 from vraptor.paths import repository_environment
 
 
-# Offline examples checked 2026-09-23; these are hints, never a model allowlist.
-# https://developers.openai.com/api/docs/models
-# https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6
-# https://platform.claude.com/docs/en/models/overview
-# https://code.claude.com/docs/en/model-config
-_MODEL_EXAMPLES = {
-    "openai": (
-        ("gpt-6-astra", "Demanding reasoning and complex workflows"),
-        ("gpt-6-sol", "Balanced coding and analysis"),
-        ("gpt-6-luna", "Efficient, high-volume tasks"),
-        ("gpt-5.6-sol", "Previous-generation flagship"),
-        ("gpt-5.6-terra", "Previous-generation balanced option"),
-        ("gpt-5.6-luna", "Previous-generation economical option"),
-    ),
-    "anthropic": (
-        ("claude-haiku-4-5-20251001", "Fast extraction and simple classification"),
-        ("claude-sonnet-5", "Balanced analysis and coding"),
-        ("claude-opus-5-5", "Complex reasoning and demanding analysis"),
-        ("claude-fable-5-1", "Hard reasoning and long-running tasks"),
-    ),
-}
-
-
 def _model_options_help(provider: str, harness: str = "") -> str:
-    """Share offline model hints between CLI help and the interactive prompt."""
+    """Share offline model hints (resources/model-catalog.toml) between CLI help and the prompt."""
     if provider == "azure_openai":
         return "Azure: enter your deployment name, which may differ from the model ID."
     label = "Claude / Anthropic" if provider == "anthropic" else "OpenAI"
     lines = [f"{label} model examples:"]
-    for model, purpose in _MODEL_EXAMPLES[provider]:
+    for model, purpose in model_examples(provider):
         lines.append(f"  {model:<27} {purpose}")
     lines.append(
         "Other supported model IDs are accepted; availability varies by account/client."
     )
     if harness == "claude_code":
-        lines.append("Claude Code also accepts aliases: sonnet, opus, haiku, fable.")
+        lines.append(
+            f"Claude Code also accepts aliases: {', '.join(model_aliases(provider))}."
+        )
     elif harness == "codex":
         lines.append(
             "Codex can inherit its model; an Azure-backed source needs its deployment name."
@@ -78,76 +62,33 @@ def _model_options_help(provider: str, harness: str = "") -> str:
     return "\n".join(lines)
 
 
-def _claude_effort_levels(model: str) -> tuple[str, ...]:
-    """Known effort-capable families; unknown models receive no automatic effort."""
-    selected = model.lower()
-    if selected.startswith(("claude-opus-4-6", "claude-sonnet-4-6")):
-        return ("low", "medium", "high", "max")
-    if selected.startswith("claude-opus-4-5"):
-        return ("low", "medium", "high")
-    if selected in {"opus", "sonnet", "fable"} or selected.startswith(
-        (
-            "claude-opus-5",
-            "claude-sonnet-5",
-            "claude-fable-5",
-            "claude-opus-4-7",
-            "claude-opus-4-8",
-        )
-    ):
-        return ("low", "medium", "high", "xhigh", "max")
-    return ()
-
-
 def _reasoning_options_help(provider: str, model: str = "") -> str:
-    """Offline effort guidance; unknown models/deployments keep free-form input.
+    """Offline effort guidance from the model catalog; unknown models keep free-form input.
 
     References: OpenAI model pages and Claude's build-with-claude/effort guide.
     """
-    levels = ("low", "medium", "high", "xhigh", "max")
-    selected = model.lower()
-    if provider == "anthropic":
-        label = "Claude / Anthropic"
-        if selected == "haiku" or selected.startswith("claude-haiku-"):
-            return (
-                "Haiku does not support a reasoning-effort setting; leave it unset.\n"
-                "Setup clears any saved or inherited effort for Haiku."
-            )
-        levels = _claude_effort_levels(model)
-        if not levels:
-            return (
-                "Claude / Anthropic reasoning efforts (model-dependent):\n"
-                "  Sonnet 5, Opus 5/5.5, Fable 5/5.1: low, medium, high, xhigh, max\n"
-                "  Opus/Sonnet 4.6: low, medium, high, max\n"
-                "  Haiku: no effort setting\n"
-                "Aliases depend on the model selected by your client. Enter keeps/inherits the displayed setting."
-            )
-    else:
-        label = "OpenAI"
-        legacy_gpt5 = selected == "gpt-5" or selected.startswith("gpt-5-2025-")
-        if (
-            provider == "azure_openai"
-            or not legacy_gpt5
-            and not selected.startswith(
-                (
-                    "gpt-6-astra",
-                    "gpt-6-sol",
-                    "gpt-6-luna",
-                    "gpt-5.6",
-                )
-            )
-        ):
-            return (
-                "OpenAI reasoning efforts (model-dependent):\n"
-                "  GPT-6 Astra: low, medium, high, xhigh, max\n"
-                "  GPT-6 Sol/Luna and GPT-5.6: none, low, medium, high, xhigh, max\n"
-                "  GPT-5: minimal, low, medium, high\n"
-                "Other models and Azure deployments may support fewer levels.\n"
-                "Enter keeps/inherits the displayed setting."
-            )
-        if legacy_gpt5:
-            levels = ("minimal", "low", "medium", "high")
-        elif not selected.startswith("gpt-6-astra"):
-            levels = ("none", *levels)
+    label = "Claude / Anthropic" if provider == "anthropic" else "OpenAI"
+    levels = None if provider == "azure_openai" else effort_levels(provider, model)
+    if levels == ():
+        name = effort_label(provider, model)
+        return (
+            f"{name} does not support a reasoning-effort setting; leave it unset.\n"
+            f"Setup clears any saved or inherited effort for {name}."
+        )
+    if not levels:
+        note = (
+            "Aliases depend on the model selected by your client."
+            if provider == "anthropic"
+            else "Other models and Azure deployments may support fewer levels."
+        )
+        return "\n".join(
+            [
+                f"{label} reasoning efforts (model-dependent):",
+                *effort_summary(provider),
+                note,
+                "Enter keeps/inherits the displayed setting.",
+            ]
+        )
     meanings = {
         "none": "No reasoning effort (supported models only)",
         "minimal": "Minimal reasoning for older GPT-5 models",
@@ -297,7 +238,7 @@ def parser_for(command: str) -> argparse.ArgumentParser:
             "--auto-token-budgets",
             action=argparse.BooleanOptionalAction,
             default=True,
-            help="Default: use maximum model output and remaining standard-price input; Haiku defaults to 120000 input / 64000 output. Use --no-auto-token-budgets to retain valid saved budgets. Explicit token flags win.",
+            help="Default: use maximum model output and remaining standard-price input; Haiku 4.5 defaults to 120000 input / 64000 output and Haiku 5.5 to 100000 / 128000. Use --no-auto-token-budgets to retain valid saved budgets. Explicit token flags win.",
         )
         budgets.add_argument(
             "--max-input-tokens",
@@ -309,7 +250,7 @@ def parser_for(command: str) -> argparse.ArgumentParser:
             "--max-output-tokens",
             type=int,
             metavar="TOKENS",
-            help="Explicit output budget; minimum 32000, maximum set by model/context limits. Defaults to the model maximum: Haiku 64000; OpenAI/Azure fallback 128000.",
+            help="Explicit output budget; minimum 32000, maximum set by model/context limits. Defaults to the model maximum (Haiku 4.5: 64000); OpenAI/Azure fallback 128000.",
         )
         advanced = parser.add_argument_group("Advanced transport and model limits")
         advanced.add_argument(
@@ -833,20 +774,22 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         model != native_model or args.model is not None or "model" in profile
     ):
         profile["model"] = model
+    # Unknown Claude models and those without effort (Haiku 4.5) get no default.
     default_effort = (
         "high"
         if provider in {"openai", "azure_openai"} and not args.from_harness
         else "medium"
-        if provider == "anthropic" and _claude_effort_levels(model or "")
+        if provider == "anthropic" and effort_levels(provider, model or "")
         else None
     )
-    is_haiku = provider == "anthropic" and (
-        (model or native_model) == "haiku"
-        or (model or native_model or "").startswith("claude-haiku-")
+    selected_model = model or native_model or ""
+    no_effort = provider == "anthropic" and effort_levels(provider, selected_model) == ()
+    no_effort_error = (
+        f"{effort_label(provider, selected_model)} does not support a reasoning-effort setting"
     )
-    if is_haiku:
+    if no_effort:
         if args.reasoning_effort:
-            raise RuntimeError("Haiku does not support a reasoning-effort setting")
+            raise RuntimeError(no_effort_error)
         profile.pop("reasoning_effort", None)
         native_effort = None
     if args.reasoning_effort is None:
@@ -856,15 +799,15 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         "reasoning_effort",
         "Reasoning effort",
         None
-        if is_haiku
+        if no_effort
         else profile.get(
             "reasoning_effort",
             defaults.get("reasoning_effort", native_effort or default_effort),
         ),
         required=False,
     )
-    if is_haiku and effort:
-        raise RuntimeError("Haiku does not support a reasoning-effort setting")
+    if no_effort and effort:
+        raise RuntimeError(no_effort_error)
     if effort is not None and (
         effort != native_effort
         or args.reasoning_effort is not None

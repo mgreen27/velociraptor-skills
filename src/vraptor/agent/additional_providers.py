@@ -8,6 +8,7 @@ from dataclasses import replace
 from importlib.metadata import version
 from typing import Any
 
+from vraptor.agent.model_budgets import adaptive_thinking
 from vraptor.agent.providers import (
     _BaseAdapter,
     _get,
@@ -79,7 +80,8 @@ class AnthropicMessagesAdapter(_BaseAdapter):
         }
         output_config: dict[str, Any] = {}
         if self.configuration.reasoning_effort:
-            options["thinking"] = {"type": "adaptive"}
+            if adaptive_thinking("anthropic", self.configuration.model):
+                options["thinking"] = {"type": "adaptive"}
             output_config["effort"] = self.configuration.reasoning_effort
         if request.output_schema:
             output_config["format"] = {

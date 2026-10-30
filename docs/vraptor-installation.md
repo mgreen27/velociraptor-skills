@@ -274,11 +274,11 @@ separate headings. Enter accepts the displayed value:
 | Advanced API settings | Optional endpoint, authentication mode and credential environment-variable name; never enter a secret value |
 | Azure endpoint URL | For direct Azure, the endpoint supplied by your administrator |
 | Model ID / deployment name | OpenAI/Claude examples and descriptions appear before the prompt; enter any supported ID. For Azure, use the **deployment name**; harness profiles can inherit |
-| Reasoning effort | Model-specific options include `xhigh` where supported; recognized Claude models default to `medium` when no effort is saved/inherited. Enter keeps the displayed value; Haiku has no effort setting |
+| Reasoning effort | Model-specific options include `xhigh` where supported; recognized Claude models default to `medium` when no effort is saved/inherited. Enter keeps the displayed value; Haiku 4.5 has no effort setting |
 | Timeout seconds | Request deadline; a new profile suggests `600` |
 | Maximum concurrency | Maximum active requests per analysis scope; start conservatively for your quota |
-| Maximum output tokens | Known model recommendation: Haiku 4.5 `64000` (model maximum; input defaults to `120000` within 200000 context); other known models use their output maximum; OpenAI/Azure fallback `128000` |
-| Maximum input tokens | Maximum remaining standard-price capacity after output; OpenAI/Azure fallback `272000`. Enter a smaller allowed number if required |
+| Maximum output tokens | Known model recommendation: Haiku 4.5 `64000` (model maximum; input defaults to `120000` within 200000 context); other known models, including Haiku 5.5, use their output maximum ([shared token budgets](model-execution.md#shared-token-budgets)); OpenAI/Azure fallback `128000` |
+| Maximum input tokens | Maximum remaining standard-price capacity after output (Haiku 5.5: `100000`); OpenAI/Azure fallback `272000`. Enter a smaller allowed number if required |
 
 New direct OpenAI/Azure profiles suggest a model and reasoning effort. Check these
 against your account or deployment before accepting them. The wizard does not
@@ -568,7 +568,7 @@ vraptor analyze --id live01 --server-profile "<SERVER REFERENCE>" \
 | `--ai-config-file PATH` | Use an alternative analyst configuration file for this run |
 
 For a different model, select a compatible saved profile. For example, an
-Anthropic profile can use `--execution-profile claude_work --model claude-sonnet-5
+Anthropic profile can use `--execution-profile claude_work --model claude-sonnet-5-5
 --reasoning-effort medium`. A model flag does not switch providers by itself.
 
 Omitting the flags preserves normal saved/environment resolution. CLI overrides

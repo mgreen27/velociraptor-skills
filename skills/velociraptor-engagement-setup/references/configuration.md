@@ -144,8 +144,8 @@ for the command sequence and limits of offline checks.
 - The reasoning-effort prompt likewise lists model-specific choices, including
   `xhigh` where supported. Enter preserves/inherits effort; recognized Claude
   models with effort support default to `medium` only if no explicit, saved,
-  shared or native effort exists. Haiku and unknown models receive no automatic
-  effort setting.
+  shared or native effort exists. Haiku 4.5 and unknown models receive no
+  automatic effort setting.
 
 ### Analysis token budgets
 

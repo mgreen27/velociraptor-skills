@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from vraptor.paths import RepositoryEnvironment
 from vraptor.paths import repository_environment
+from vraptor.agent.model_budgets import effort_label, effort_levels
 from vraptor.agent.registry import PROVIDERS, validate_endpoint
 from vraptor.agent import sources as config_sources
 
@@ -1312,14 +1313,14 @@ def resolve_unresolved_agent_route(
             raise RuntimeError(
                 "Anthropic reasoning_effort must be low, medium, high, xhigh or max"
             )
-        if provider == "anthropic" and (
-            model in {"haiku", "claude-haiku-4-5", "claude-haiku-4-5-20251001"}
-        ):
-            # Haiku 4.5 has no effort parameter. In particular, a model switch
-            # must not carry a saved/native Sonnet effort into SDK/API requests.
+        if provider == "anthropic" and effort_levels(provider, model) == ():
+            # Models without an effort parameter (Haiku 4.5). In particular, a
+            # model switch must not carry a saved/native Sonnet effort into
+            # SDK/API requests.
             values["reasoning_effort"] = ""
             provenance["reasoning_effort"] = SourceProvenance(
-                kind="model_capability", name="Haiku 4.5 does not support effort"
+                kind="model_capability",
+                name=f"{effort_label(provider, model)} does not support effort",
             )
         key = (
             str(key_candidate.value)

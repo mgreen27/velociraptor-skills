@@ -262,7 +262,15 @@ def test_model_helpers_precede_prompt_without_restricting_models(
             assert "[saved-model]" in prompt
             hints = capsys.readouterr().err
             if choice in {"anthropic", "claude_code"}:
-                assert "claude-sonnet-5" in hints and "claude-opus-5-5" in hints
+                assert all(
+                    model in hints
+                    for model in (
+                        "claude-sonnet-5-5",
+                        "claude-opus-5-5",
+                        "claude-haiku-5-5",
+                        "claude-fable-5-1",
+                    )
+                )
                 assert "gpt-6-astra" not in hints
                 assert ("aliases: sonnet, opus, haiku, fable" in hints) == (
                     choice == "claude_code"
@@ -271,7 +279,16 @@ def test_model_helpers_precede_prompt_without_restricting_models(
                 assert "enter your deployment name" in hints
                 assert "gpt-6-astra" not in hints
             else:
-                assert "gpt-6-astra" in hints and "gpt-5.6-luna" in hints
+                assert all(
+                    model in hints
+                    for model in (
+                        "gpt-6-astra",
+                        "gpt-6.1-sol",
+                        "gpt-6.1-terra",
+                        "gpt-6-luna",
+                        "gpt-5.6-luna",
+                    )
+                )
                 assert "claude-sonnet-5" not in hints
             seen.append(prompt)
             return entered
@@ -327,6 +344,8 @@ def test_explicit_model_skips_suggestions_and_preserves_json_output(tmp_path, ca
     "choice,model,expected,absent",
     [
         ("openai", "gpt-6-astra", "  xhigh", "  none"),
+        ("openai", "gpt-6.1-sol", "  xhigh", "  none"),
+        ("openai", "gpt-6.1-terra", "  none", "Haiku"),
         ("openai", "gpt-6-sol", "  none", "Haiku"),
         ("openai", "gpt-5.6-luna", "  none", "Haiku"),
         ("openai", "gpt-5", "  minimal", "  none"),
@@ -334,6 +353,8 @@ def test_explicit_model_skips_suggestions_and_preserves_json_output(tmp_path, ca
         ("claude_code", "claude-opus-5-5", "  xhigh", "  none"),
         ("anthropic", "claude-opus-4-6", "  max", "  xhigh"),
         ("anthropic", "claude-haiku-4-5-20251001", "does not support", "  xhigh"),
+        ("anthropic", "claude-haiku-5-5", "  xhigh", "does not support"),
+        ("claude_code", "haiku", "  xhigh", "does not support"),
         (
             "azure_openai",
             "custom-deployment",
@@ -353,7 +374,7 @@ def test_effort_options_precede_prompt_and_preserve_saved_values(
     flags += ["--model", model]
     if choice == "azure_openai":
         flags += ["--base-url", "https://azure.example.test"]
-    saved_effort = [] if "haiku" in model else ["--reasoning-effort", "low"]
+    saved_effort = [] if "haiku-4-5" in model else ["--reasoning-effort", "low"]
     manage.setup(setup_args(tmp_path, *flags, *saved_effort))
     capsys.readouterr()
     seen = []
@@ -383,13 +404,17 @@ def test_effort_options_precede_prompt_and_preserve_saved_values(
     "model,expected",
     [
         ("claude-sonnet-5", "medium"),
+        ("claude-sonnet-5-5", "medium"),
+        ("claude-haiku-5-5", "medium"),
         ("claude-opus-5-5", "medium"),
         ("claude-fable-5-1", "medium"),
         ("claude-opus-4-5-20251101", "medium"),
         ("claude-sonnet-4-6", "medium"),
         ("claude-opus-4-6", "medium"),
         ("claude-haiku-4-5-20251001", None),
-        ("haiku", None),
+        ("claude-haiku-4-5", None),
+        # The haiku alias names Haiku 5.5, which takes effort.
+        ("haiku", "medium"),
         ("claude-sonnet-4-5", None),
         ("custom-model", None),
     ],
