@@ -314,7 +314,7 @@ identity, file bytes and executable modes on both sides, baselines, manifest,
 deny rules, accepted resolutions, and allow flags. If any of these change,
 preview and review again. Git inventories are loaded once per repository, and
 committed content is fetched in one batch containing only managed blobs.
-Preview exits with `0` for unchanged/converged content, `1` for drift or policy
+Preview exits with `0` for unchanged, converged or held content, `1` for drift or policy
 findings, and `2` for an invalid request or failed safety check. It changes no
 managed files or baseline; it appends local audit metadata.
 
@@ -330,6 +330,14 @@ them for merge markers and public deny patterns, and advances the source
 fingerprint without hand-editing `.sync-state.json`. Remaining public differences
 continue to appear as `reverse-needed`; a later upstream change still conflicts
 and requires review. Unknown paths and deletion conflicts are rejected.
+
+`config/sync-held.tsv` lists managed files that keep a reviewed public
+adaptation, such as the per-repository AI setup defaults. Both directions report
+them as `held` (with `--diff` showing the difference) and never write them, even
+after `--accept-resolved` has moved a baseline, so a later apply in the other
+direction cannot overwrite either side. Held files do not block other imports,
+and `--accept-resolved` refuses them. Port their upstream changes by hand, then
+keep or remove the row.
 
 When upstream adds dependencies, references, or regression tests, review the
 public package metadata and explicit manifest entries as well as managed trees.

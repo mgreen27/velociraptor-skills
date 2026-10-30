@@ -21,8 +21,8 @@ from typing import Iterable
 
 from public_audit import append_audit, finding_metadata
 from sync_policy import (
-    SCHEMA_VERSION, Mapping, PolicyError, load_deny_patterns, load_manifest, load_state, pair_key,
-    validate_relative_path,
+    SCHEMA_VERSION, Mapping, PolicyError, load_deny_patterns, load_held, load_manifest, load_state,
+    pair_key, validate_relative_path,
 )
 
 
@@ -340,7 +340,9 @@ def plan_actions(
     public_reader: Reader,
     state: dict,
     direction: str,
+    held: Iterable[str] = (),
 ) -> list[Action]:
+    held = set(held)
     ai_reader.prepare([(pair.ai_path, mode) for pair, mode, _ in pairs if mode is not None])
     public_reader.prepare([(pair.public_path, mode) for pair, _, mode in pairs if mode is not None])
     actions: list[Action] = []
@@ -382,6 +384,9 @@ def plan_actions(
                 status = "converged"
             else:
                 status = "conflict"
+        # A held file keeps its reviewed adaptation: report it, never write it.
+        if pair.public_path in held and status not in {"unchanged", "converged"}:
+            status = "held"
         actions.append(Action(status, pair, source, target, base))
     return actions
 
@@ -428,6 +433,8 @@ def accept_resolutions(actions: list[Action], paths: list[str], direction: str) 
         path = action.pair.public_path if direction == "from-ai" else action.pair.ai_path
         if path in requested:
             requested.remove(path)
+            if action.status == "held":
+                raise SyncError(f"held files are ported by hand and never resolved: {path}")
             if action.status != "conflict" or action.source is None or action.target is None:
                 raise SyncError(f"--accept-resolved requires a two-file conflict: {path}")
             if re.search(rb"(?m)^(?:<<<<<<< |=======\r?$|>>>>>>> )", action.target.data):
@@ -588,8 +595,10 @@ def main(argv: list[str] | None = None) -> int:
 
     manifest_path = public_repo / "config" / "sync-manifest.tsv"
     deny_path = public_repo / "config" / "public-deny-patterns.tsv"
+    held_path = public_repo / "config" / "sync-held.tsv"
     state_path = public_repo / ".sync-state.json"
     mappings = load_manifest(manifest_path)
+    held = load_held(held_path)
     state = load_state(state_path)
 
     if args.working_tree:
@@ -608,7 +617,10 @@ def main(argv: list[str] | None = None) -> int:
         ai_reader, public_reader = target_reader, source_reader
 
     pairs = build_pairs(mappings, ai_reader, public_reader, state)
-    actions = plan_actions(pairs, ai_reader, public_reader, state, args.direction)
+    unknown_held = sorted(set(held) - {pair.public_path for pair, _, _ in pairs})
+    if unknown_held:
+        raise SyncError("held paths are not managed files: " + ", ".join(unknown_held))
+    actions = plan_actions(pairs, ai_reader, public_reader, state, args.direction, held)
     actions = accept_resolutions(actions, args.accept_resolved, args.direction)
     render_report(actions, args.direction)
     if args.diff:
@@ -630,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         "mappings": [(mapping.ai_path, mapping.public_path, mapping.kind) for mapping in mappings],
         "deny_patterns": [(label, pattern.pattern, pattern.flags) for label, pattern in patterns],
         "state": state,
+        "held": sorted(held.items()),
         "accept_resolved": sorted(set(args.accept_resolved)),
         "allow_delete": args.allow_delete,
         "allow_policy_findings": args.allow_policy_findings,
@@ -649,7 +662,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.require_plan_hash is not None and args.require_plan_hash.lower() != plan_hash:
         raise SyncError("reviewed plan has changed; run --check and review again before applying")
 
-    changed = [action for action in actions if action.status not in {"unchanged", "converged"}]
+    changed = [action for action in actions if action.status not in {"unchanged", "converged", "held"}]
     if not args.apply:
         return 1 if changed or findings else 0
     if conflicts:
@@ -697,6 +710,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Applied synchronization and updated {state_path.relative_to(public_repo)}")
     if reverse_pending:
         print(f"Left destination-only files untouched: {len(reverse_pending)}")
+    held_actions = [action for action in actions if action.status == "held"]
+    if held_actions:
+        print(f"Left held files untouched: {len(held_actions)}")
     return 0
 
 

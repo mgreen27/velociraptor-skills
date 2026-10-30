@@ -14,7 +14,9 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
   be upstreamed. Run `to-ai` only with the owner's approval, with the same
   `--check`, review and `--apply` steps.
 - Preserve dirty work and never overwrite a managed file that changed on both
-  sides. `.codex/agents/hunt-agent.toml` is a deliberate public adaptation.
+  sides. Files in `config/sync-held.tsv` (`.codex/agents/hunt-agent.toml`, the
+  per-repository AI setup defaults) keep reviewed public adaptations: the sync
+  reports them as `held` and never writes them, so port upstream changes by hand.
 - The sync rewrites upstream `packages/vraptor/...` paths to this layout; a
   file that differs only by those paths is converged.
 - Repository-owned, not synchronized: this file, `CLAUDE.md`, `README.md`,

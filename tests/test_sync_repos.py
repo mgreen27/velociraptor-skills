@@ -539,3 +539,112 @@ def test_dirty_excluded_source_does_not_block_committed_sync(tmp_path):
     result = run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public, expected=2)
     assert "managed source paths are dirty" in result.stderr
     assert "shared/local" not in result.stderr
+
+
+def initialize_held_pair(tmp_path: Path) -> tuple[Path, Path, Path]:
+    public, ai, script = initialize_pair(tmp_path)
+    (public / "config" / "sync-manifest.tsv").write_text(
+        "shared/file.txt\tmanaged/file.txt\tfile\nshared/held.txt\tmanaged/held.txt\tfile\n",
+        encoding="utf-8",
+    )
+    (ai / "shared" / "held.txt").write_text("default one\n", encoding="utf-8")
+    commit_all(ai, "add held file")
+    commit_all(public, "manage held file")
+    run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public)
+    (ai / "shared" / "held.txt").write_text("ai default\n", encoding="utf-8")
+    (public / "managed" / "held.txt").write_text("public default\n", encoding="utf-8")
+    commit_all(ai, "ai default")
+    commit_all(public, "public default")
+    return public, ai, script
+
+
+def hold(public: Path, *paths: str) -> None:
+    rows = "".join(f"{path}\treviewed adaptation\n" for path in paths)
+    (public / "config" / "sync-held.tsv").write_text(rows, encoding="utf-8")
+    commit_all(public, "hold files")
+
+
+@pytest.mark.parametrize("direction", ["from-ai", "to-ai"])
+def test_held_file_is_reported_and_never_written(tmp_path: Path, direction: str) -> None:
+    public, ai, script = initialize_held_pair(tmp_path)
+    if direction == "from-ai":
+        # Without the held row, the conflict would block every other import.
+        run(["python3", str(script), "from-ai", "--source", str(ai), "--apply"], public, expected=2)
+    hold(public, "managed/held.txt")
+    source = ai if direction == "from-ai" else public
+    source_path = "shared/file.txt" if direction == "from-ai" else "managed/file.txt"
+    (source / source_path).write_text("version two\n", encoding="utf-8")
+    commit_all(source, "version two")
+    args = ["python3", str(script), direction, "--source" if direction == "from-ai" else "--target", str(ai)]
+
+    preview = run([*args, "--check", "--diff"], public, expected=1)
+    reported = "managed/held.txt" if direction == "from-ai" else "shared/held.txt"
+    assert f"held            {reported}" in preview.stdout
+    assert ("+ai default" if direction == "from-ai" else "+public default") in preview.stdout
+    result = run([*args, "--apply"], public)
+    assert "Left held files untouched: 1" in result.stdout
+    assert (public / "managed/file.txt").read_text() == "version two\n"
+    assert (ai / "shared/file.txt").read_text() == "version two\n"
+    assert (public / "managed/held.txt").read_text() == "public default\n"
+    assert (ai / "shared/held.txt").read_text() == "ai default\n"
+    # With only held differences left, a check reports nothing to do.
+    run([*args, "--check"], public)
+
+
+@pytest.mark.parametrize("direction", ["from-ai", "to-ai"])
+def test_held_file_survives_reverse_apply_after_resolution(tmp_path: Path, direction: str) -> None:
+    public, ai, script = initialize_held_pair(tmp_path)
+    resolve = "managed/held.txt" if direction == "from-ai" else "shared/held.txt"
+    first = ["python3", str(script), direction, "--source" if direction == "from-ai" else "--target", str(ai)]
+    run([*first, "--apply", "--accept-resolved", resolve], public)
+    reverse = "to-ai" if direction == "from-ai" else "from-ai"
+    second = ["python3", str(script), reverse, "--target" if reverse == "to-ai" else "--source", str(ai)]
+    # The moved baseline makes the other direction a plain update ...
+    assert "update" in run([*second, "--check"], public, expected=1).stdout
+    hold(public, "managed/held.txt")
+    # ... which the held row turns into a report.
+    run([*second, "--apply"], public)
+    assert (public / "managed/held.txt").read_text() == "public default\n"
+    assert (ai / "shared/held.txt").read_text() == "ai default\n"
+
+
+def test_held_file_cannot_be_accept_resolved(tmp_path: Path) -> None:
+    public, ai, script = initialize_held_pair(tmp_path)
+    hold(public, "managed/held.txt")
+    result = run(
+        ["python3", str(script), "from-ai", "--source", str(ai), "--apply", "--accept-resolved", "managed/held.txt"],
+        public,
+        expected=2,
+    )
+    assert "held files are ported by hand" in result.stderr
+
+
+@pytest.mark.parametrize("row", ["managed/missing.txt\tgone\n", "managed/held.txt\n", "../held.txt\tescape\n"])
+def test_invalid_held_rows_are_rejected(tmp_path: Path, row: str) -> None:
+    public, ai, script = initialize_held_pair(tmp_path)
+    (public / "config" / "sync-held.tsv").write_text(row, encoding="utf-8")
+    commit_all(public, "bad held row")
+    run(["python3", str(script), "from-ai", "--source", str(ai), "--check"], public, expected=2)
+    assert (public / "managed/held.txt").read_text() == "public default\n"
+
+
+def test_committed_held_list_keeps_ai_setup_defaults() -> None:
+    from sync_policy import load_held, load_manifest
+
+    held = load_held(ROOT / "config" / "sync-held.tsv")
+    managed = load_manifest(ROOT / "config" / "sync-manifest.tsv")
+    for path in held:
+        assert (ROOT / path).is_file(), path
+        assert any(
+            path == row.public_path or (row.kind == "tree" and path.startswith(row.public_path + "/"))
+            for row in managed
+        ), path
+    # These carry the per-repository AI setup defaults; a sync must not flip them.
+    assert {
+        "docs/model-execution.md",
+        "src/vraptor/agent/manage.py",
+        "src/vraptor/settings.py",
+        "tests/test_agent_setup_defaults.py",
+        "tests/test_operational_connection_options.py",
+        "tests/test_vraptor_settings.py",
+    } <= set(held)

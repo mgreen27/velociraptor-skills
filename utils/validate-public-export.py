@@ -13,12 +13,13 @@ import tempfile
 from pathlib import Path
 
 from public_audit import append_audit, finding_metadata
-from sync_policy import PolicyError, load_deny_patterns, load_manifest, load_state
+from sync_policy import PolicyError, load_deny_patterns, load_held, load_manifest, load_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DENY_FILE = REPO_ROOT / "config" / "public-deny-patterns.tsv"
 MANIFEST = REPO_ROOT / "config" / "sync-manifest.tsv"
+HELD = REPO_ROOT / "config" / "sync-held.tsv"
 STATE = REPO_ROOT / ".sync-state.json"
 GOLDEN_DB = REPO_ROOT / "src" / "vraptor" / "resources" / "golden" / "autoruns-golden.sqlite"
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -31,6 +32,11 @@ MANIFEST_ERRORS = {
     "overlap": "overlapping manifest paths at line {line}",
     "duplicate": "duplicate manifest path at line {line}",
     "empty": "manifest has no mappings",
+}
+HELD_ERRORS = {
+    "row": "invalid held row: {held}:{line}",
+    "path": "unsafe held path: {value}",
+    "duplicate": "duplicate held path at line {line}",
 }
 STATE_ERRORS = {
     "schema": "sync state has an unsupported schema",
@@ -175,6 +181,16 @@ def check_manifest(errors: list[str]) -> None:
     )
 
 
+def check_held(errors: list[str]) -> None:
+    problems: list[PolicyError] = []
+    held = load_held(HELD, problems)
+    errors.extend(
+        HELD_ERRORS[problem.reason].format(held=HELD.relative_to(REPO_ROOT), line=problem.line, value=problem.value)
+        for problem in problems
+    )
+    errors.extend(f"held path is not a file: {path}" for path in held if not (REPO_ROOT / path).is_file())
+
+
 def check_database(errors: list[str]) -> None:
     if not GOLDEN_DB.is_file():
         errors.append(f"missing Autoruns GoldenDB: {GOLDEN_DB.relative_to(REPO_ROOT)}")
@@ -202,7 +218,7 @@ def validate_static() -> int:
         findings = check_deny_patterns(scan_files, errors)
     for path, check in (
         (REPO_ROOT / "config/example.env", check_env), (STATE, check_state),
-        (MANIFEST, check_manifest), (GOLDEN_DB, check_database),
+        (MANIFEST, check_manifest), (HELD, check_held), (GOLDEN_DB, check_database),
     ):
         if has_symlink(path):
             errors.append(f"validation input must not use symlinks: {path.relative_to(REPO_ROOT)}")

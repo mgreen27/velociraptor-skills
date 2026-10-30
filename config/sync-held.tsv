@@ -1,0 +1,14 @@
+# Managed files that keep a reviewed public adaptation. sync-repos.py reports
+# them as "held", shows their diff with --diff, and never writes them in either
+# direction, even after --accept-resolved has moved a baseline. Port upstream
+# changes to these files by hand, then keep or remove the row.
+# public_path	reason
+.codex/agents/hunt-agent.toml	Public Codex hunt agent adaptation.
+docs/model-execution.md	AI setup defaults kept per repository (owner decision 2026-10-30).
+skills/velociraptor-host-analysis/SKILL.md	The incident-response guidebook PDF is not exported.
+skills/velociraptor-mapped-client/SKILL.md	AI setup defaults kept per repository (owner decision 2026-10-30).
+src/vraptor/agent/manage.py	AI setup defaults kept per repository (owner decision 2026-10-30).
+src/vraptor/settings.py	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_agent_setup_defaults.py	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_operational_connection_options.py	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_vraptor_settings.py	AI setup defaults kept per repository (owner decision 2026-10-30).
