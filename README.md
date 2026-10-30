@@ -19,9 +19,6 @@ collection, hunting, and host analysis.
 The repository also contains the shared `./vraptor` runtime, bounded custom-agent
 templates, and installation helpers used by these skills.
 
-See the [public release review](docs/public-release-review.md) for import scope,
-sanitization and validation results.
-
 ## Install
 
 The default setup connects to an **existing live Velociraptor server** and uses
@@ -68,7 +65,9 @@ add `--no-path` for dependency-only installation or CI. Non-interactive runs als
 skip the wizard. Run bare
 `./vraptor setup configure` later to reopen the wizard.
 Remote API usernames must be selected explicitly before fetching or provisioning
-credentials. Account creation requires explicit authorization and `--provision-api`;
+credentials. For a setup request with an explicitly configured API user, the skills
+pass `--provision-api` under the
+[API-user provisioning rule](docs/reference/velociraptor-operation-authorization.md#api-user-provisioning);
 existing accounts are preserved. See [account setup](skills/velociraptor-live-api-client/references/service-account-config.md).
 Remote API access needs no local Velociraptor binary, SSH connection or Codex login.
 The offline checks above do not prove live authentication; explicit connection
@@ -200,19 +199,11 @@ supported; `--server` selects the connection profile. See the
 [CLI contract](docs/contracts/cli.md) and [architecture](docs/contracts/architecture.md).
 
 Live mutations remain subject to the authorization requirements in
-the individual skills. Case-bound commands append progress, automatic numeric
-metrics, and bounded sanitized server text to
-`<case-root>/<id>/logs/velociraptor-progress.log`. Recognized credentials are
-redacted; server text may still contain evidence-sensitive paths, usernames,
-hostnames, or VQL. See the [logging reference](docs/reference/velociraptor-logging.md).
-
-AI requests also append provider-reported token counts to
-`<case-root>/<id>/logs/token-usage.jsonl`: one record per request attempt and
-one command-end summary across concurrent agents, grouped by provider and model.
-Retries are counted separately; missing usage is marked unavailable. This log
-contains counters and identifiers, without prompts or responses. `--no-log-file`
-disables both logs. Use `vraptor logs usage --global --json` for retained local
-provider-token accounting; these observations are not billed charges.
+the individual skills. Case-bound commands log progress to
+`<case-root>/<id>/logs/velociraptor-progress.log` and AI token counts to
+`logs/token-usage.jsonl`; server text in the progress log may still contain
+evidence-sensitive paths, usernames, hostnames or VQL. See the
+[logging reference](docs/reference/velociraptor-logging.md).
 
 Current analysis capabilities include `--skip-ai` deterministic preparation,
 full synthesis by default (`--synthesis full`), explicitly requested caller-led
@@ -237,117 +228,9 @@ this is an operator workflow, not an automatic CLI import hook.
 
 ## Repository synchronization
 
-The shared runtime lives in `src/vraptor/`, portable tests in `tests/core/`,
-and shared contracts in `docs/contracts/` and `docs/reference/`. Packaged scripts
-and Autoruns GoldenDB assets live under `src/vraptor/resources/`; standalone
-review and validation utilities live under `utils/`. The retired
-`dfir-case-tools/` directory and its legacy discovery helpers have been removed.
-Use `./vraptor` for runtime commands; `./dfir` remains a compatibility CLI alias.
-The shared runtime uses explicit connection settings and excludes private
-discovery adapters and business case-management modules.
-
-The shared export uses these folder mappings:
-
-| ai_skills | This repository |
-| --- | --- |
-| `packages/vraptor/src/vraptor` | `src/vraptor` |
-| `packages/vraptor/tests/core` | `tests/core` |
-| `packages/vraptor/docs/contracts` | `docs/contracts` |
-| `packages/vraptor/docs/reference` | `docs/reference` |
-| `packages/vraptor/pyproject.toml` | `pyproject.toml` |
-
-The manifest is `config/sync-manifest.tsv`. An optional fourth column lists
-comma-separated globs that a tree row skips, such as private markers or bulky
-assets. Imports rewrite ai_skills package paths in text to this layout
-(`packages/vraptor/src/vraptor` to `src/vraptor`, and likewise for
-`tests/core`, `docs/` and package-doc links to repository-root targets), and
-both directions compare in this layout. `to-ai --apply` refuses files that contain
-layout paths, so port those to ai_skills by hand. `.sync-state.json` records the
-content hash at the last successful synchronization. The baseline is local to
-each checkout and Git-ignored; keep it locally to preserve change tracking.
-Fresh clones start without a baseline. The first reviewed `--apply` creates it;
-without a baseline, differing files present on both sides are treated as
-conflicts and require manual review. Public-export validation does not require
-the baseline, but checks it when present.
-
-The shared setup skill may contain single-line local routing ending in
-`<!-- private-setup-routing -->`. Imports strip those lines before comparison,
-hashing and copying; all other content retains normal conflict and policy checks.
-Review reverse-sync conflicts to preserve private routing. Run public-export
-validation after importing; never copy the private setup adapter into this repository.
-
-Preview and import a committed revision from a sibling `ai_skills` checkout:
-
-```sh
-./utils/sync-repos.py from-ai --source ../ai_skills --check
-./utils/sync-repos.py from-ai --source ../ai_skills --apply --require-plan-hash SHA256_FROM_PREVIEW
-```
-
-Preview and propagate committed public changes back to `ai_skills`:
-
-```sh
-./utils/sync-repos.py to-ai --target ../ai_skills --check
-./utils/sync-repos.py to-ai --target ../ai_skills --apply --require-plan-hash SHA256_FROM_PREVIEW
-```
-
-Committed revisions are used by default. `--working-tree` deliberately uses
-tracked and non-ignored untracked working-tree content. Source deletions require `--allow-delete`.
-Both source and destination working-tree paths reject symlinked files or parent
-directories. Manifest paths must be canonical, relative and non-overlapping on
-either side. Malformed baseline records stop synchronization before any writes.
-Conflicting changes on both sides are never merged automatically. Use
-`--allow-reverse-pending` only to apply independent source changes while
-leaving destination-only changes untouched for a later reverse sync.
-
-Every preview prints a `Plan SHA256`. Pass it to `--require-plan-hash` when
-applying to reject changes since review before writing files or sync state.
-For example, to import uncommitted upstream work while retaining public changes:
-
-```sh
-./utils/sync-repos.py from-ai --source ../ai_skills --working-tree --allow-reverse-pending --check
-./utils/sync-repos.py from-ai --source ../ai_skills --working-tree --allow-reverse-pending --apply --require-plan-hash SHA256_FROM_PREVIEW
-```
-
-Use the same options in both commands, except `--check`/`--apply`, `--diff`, and
-the hash guard. The hash covers repository paths, revision or working-tree
-identity, file bytes and executable modes on both sides, baselines, manifest,
-deny rules, accepted resolutions, and allow flags. If any of these change,
-preview and review again. Git inventories are loaded once per repository, and
-committed content is fetched in one batch containing only managed blobs.
-Preview exits with `0` for unchanged/converged content, `1` for drift or policy
-findings, and `2` for an invalid request or failed safety check. It changes no
-managed files or baseline; it appends local audit metadata.
-
-Add `--diff` to a preview for destination-to-source text comparisons and binary
-size summaries. Comparisons include conflicts and public-only differences, so
-they may contain private source text; keep review output outside this repository.
-
-For a conflict, manually merge the upstream change into the destination while
-preserving public adaptations. Then preview with
-`--accept-resolved path/to/destination` (repeat for each reviewed file), and use
-the same options with `--apply`. This preserves the destination bytes, checks
-them for merge markers and public deny patterns, and advances the source
-fingerprint without hand-editing `.sync-state.json`. Remaining public differences
-continue to appear as `reverse-needed`; a later upstream change still conflicts
-and requires review. Unknown paths and deletion conflicts are rejected.
-
-When upstream adds dependencies, references, or regression tests, review the
-public package metadata and explicit manifest entries as well as managed trees.
-Packaged `src/vraptor/resources/profiles/profiles.toml` supplies runtime response
-profiles. Generic operational and analyst examples live in `config/`. Setup,
-provider, lifecycle, credential handling, and analysis regression tests are
-explicitly allowlisted. Custom Codex agents live in `.codex/agents/`; runtime
-response profiles are owned solely by the packaged file above.
-
-Public-owned files such as this README, CI, configuration templates, and sync
-utilities are outside the managed export unless they are explicitly present in
-the manifest.
-
-Retired utility mappings must stay removed from future exports. Use
-`vraptor artifacts validate-schema --snapshot FILE --strict` for offline schema
-validation and native `ssh-add` for SSH-agent enrollment. See the
-[setup audit and upstream alignment instructions](docs/setup-configuration-audit.md)
-before changing installer, launcher or sync ownership.
+Managed files are maintained upstream in `ai_skills` and imported with
+`utils/sync-repos.py`. The [maintainer guide](docs/maintainers.md) covers the
+folder mappings, held files, sync commands and conflict handling.
 
 ## Validation
 
@@ -373,8 +256,6 @@ The static export validator and synchronization policy scan append metadata to
 status, rule labels and hashed relative paths, without matched content or raw
 filenames. A static-check pass is not a pass of the later shell/CLI checks;
 a sync-policy pass is not confirmation that synchronization was applied.
-See the [repository audit](docs/repository-audit.md) for coverage, limitations,
-and folder-by-folder retention recommendations.
 
 The test suite also executes native VQL against synthetic rows. It requires the
 Velociraptor executable, separately from the Python API package. CI installs

@@ -26,7 +26,7 @@ GoldenDB updates, removals, and publication belong to the reviewed
 `velociraptor-hunting` workflow. Machine analysis must not modify GoldenDB.
 
 Live and offline host filtering use the shared
-[Autoruns identity contract](../../velociraptor-hunting/references/windows-persistence-autoruns.md#accounting-and-identity-diagnostics).
+[Autoruns identity contract](../../velociraptor-hunting/references/goldendb-maintenance.md#accounting-and-identity-diagnostics).
 Version 4 preserves non-ASCII spelling exactly and rejects earlier GoldenDB
 versions. Use `--no-autoruns-golden` for unfiltered review while a compatible
 database is rebuilt from reviewed original rows. Host cache identities are

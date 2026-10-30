@@ -18,7 +18,6 @@ from vraptor.common import atomic_io
 from vraptor.common.labels import parse_label_values
 from vraptor import case_layout
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 from vraptor.resources import repository_root
 REPO_ROOT = repository_root()
 
@@ -77,11 +76,6 @@ def run_command(
     )
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-
-
 def validate_api_client_security(path: Path) -> dict[str, Any]:
     metadata = engagement_state.api_metadata(path)
     failures = engagement_state.credential_security_failures(metadata)
@@ -104,17 +98,14 @@ def validate_api_client_security(path: Path) -> dict[str, Any]:
     return metadata
 
 
-def build_leaf_manifest_path(manifest_out: str | None, prefix: str) -> Path:
+def build_leaf_manifest_path(prefix: str) -> Path:
     with tempfile.NamedTemporaryFile(prefix=prefix, suffix=".json", delete=False) as tmp_file:
         return Path(tmp_file.name)
 
 
 @contextmanager
-def managed_leaf_manifest_path(
-    manifest_out: str | None,
-    prefix: str,
-) -> Iterator[Path]:
-    path = build_leaf_manifest_path(manifest_out, prefix)
+def managed_leaf_manifest_path(prefix: str) -> Iterator[Path]:
+    path = build_leaf_manifest_path(prefix)
     try:
         yield path
     finally:
@@ -649,49 +640,32 @@ def command_local_deaddisk(args: argparse.Namespace) -> dict[str, Any]:
     ensure_local_runtime(api_client_path)
     if not args.client_id and not args.hostname:
         raise RuntimeError("Local readiness requires --client-id or --hostname for explicit target verification.")
-    with managed_leaf_manifest_path(
-        args.manifest_out,
-        "velo-engage-local-",
-    ) as leaf_manifest_path:
-        server_reachable = verify_api_reachable(api_client_path, use_local_cli=True)
-        if args.client_id:
-            target = verify_client_id_visible(api_client_path, args.client_id, use_local_cli=True)
-        else:
-            target = verify_hostname_visible(api_client_path, args.hostname, use_local_cli=True)
-        if not server_reachable:
-            raise RuntimeError("Local Velociraptor API did not answer.")
-        if not target["target_visible"]:
-            raise RuntimeError("Requested local client is not visible through the Velociraptor API.")
-        write_json(
-            leaf_manifest_path,
-            {
-                "status": "verified",
-                "api_client_config": str(api_client_path),
-                "evidence_path": str(args.evidence_path or ""),
-                "client_id": str(target.get("client_id") or ""),
-                "hostname": str(target.get("hostname") or ""),
-            },
-        )
-        return build_unified_manifest(
-            engagement_id=selected_engagement_id(args),
-            engagement_id_source=selected_engagement_id_source(args),
-            server_profile=selected_server_profile(args),
-            mode="local_dead_disk",
-            source_skill="velociraptor-engagement-setup",
-            api_client_path=api_client_path,
-            verification={
-                "server_reachable": server_reachable,
-                **target,
-            },
-            next_step_hint="Proceed to velociraptor-collection for one-host deep dive or velociraptor-hunting if scope is still cross-host.",
-        )
+    server_reachable = verify_api_reachable(api_client_path, use_local_cli=True)
+    if args.client_id:
+        target = verify_client_id_visible(api_client_path, args.client_id, use_local_cli=True)
+    else:
+        target = verify_hostname_visible(api_client_path, args.hostname, use_local_cli=True)
+    if not server_reachable:
+        raise RuntimeError("Local Velociraptor API did not answer.")
+    if not target["target_visible"]:
+        raise RuntimeError("Requested local client is not visible through the Velociraptor API.")
+    return build_unified_manifest(
+        engagement_id=selected_engagement_id(args),
+        engagement_id_source=selected_engagement_id_source(args),
+        server_profile=selected_server_profile(args),
+        mode="local_dead_disk",
+        source_skill="velociraptor-engagement-setup",
+        api_client_path=api_client_path,
+        verification={
+            "server_reachable": server_reachable,
+            **target,
+        },
+        next_step_hint="Proceed to velociraptor-collection for one-host deep dive or velociraptor-hunting if scope is still cross-host.",
+    )
 
 
 def command_remote_deaddisk(args: argparse.Namespace) -> dict[str, Any]:
-    with managed_leaf_manifest_path(
-        args.manifest_out,
-        "velo-engage-remote-disk-",
-    ) as leaf_manifest_path:
+    with managed_leaf_manifest_path("velo-engage-remote-disk-") as leaf_manifest_path:
         return _command_remote_deaddisk(args, leaf_manifest_path)
 
 
@@ -844,10 +818,7 @@ def verify_mapped_readiness(args, mapping, api_client_path, *, mode):
 
 
 def command_live_remote(args: argparse.Namespace) -> dict[str, Any]:
-    with managed_leaf_manifest_path(
-        args.manifest_out,
-        "velo-engage-live-",
-    ) as leaf_manifest_path:
+    with managed_leaf_manifest_path("velo-engage-live-") as leaf_manifest_path:
         return _command_live_remote(args, leaf_manifest_path)
 
 

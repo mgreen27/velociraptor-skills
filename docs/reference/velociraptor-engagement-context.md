@@ -81,11 +81,10 @@ Reuse valid saved readiness and attempt the requested operation. On a connection
 or readiness failure, diagnose the same server and investigation binding before
 refreshing readiness through setup. Rechecking readiness does not regenerate
 credentials. Acquiring existing remote files requires `--fetch-config`; creating
-missing files requires `--provision-api` or `--provision-client`. For a setup
-request with an explicit configured API user, the skill automatically includes
-`--provision-api` without another approval, unless the operator restricts
-provisioning or requests read-only/fetch-only work. Cached YAML identity and
-application defaults alone do not authorize creation. Shared API setup
+missing files requires `--provision-api` or `--provision-client`; skills pass
+`--provision-api` under the
+[API-user provisioning rule](velociraptor-operation-authorization.md#api-user-provisioning).
+Shared API setup
 first prepares the selected account (manual by default); bootstrap credentials
 are restricted to that account step and never operational readiness. Replacing the
 remote API credential requires `--regenerate-remote-api`. Do not add provisioning

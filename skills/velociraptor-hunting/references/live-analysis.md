@@ -61,7 +61,12 @@ required. Supported run-only profile/model/token overrides are documented in
 [model execution](../../../docs/model-execution.md). Full live analysis, generic
 stacks and Autoruns stacks use the same resolved analyst specification. Inspect
 `vraptor ai config` at session initialization or after relevant changes, rather
-than repeating configuration discovery for each hunt.
+than repeating configuration discovery for each hunt. Setup saves per-profile
+input/output budgets and fills shared `[analysis_defaults]`. Limits resolve once
+per operation; Claude uses shared budgets when model limits are omitted.
+Analysis profiles choose only `high-volume`, `reasoning`, or `synthesis`; code
+derives the task. With `codex_app_server`, stack and chunk requests use
+shared-daemon ephemeral turns rather than one Codex process per request.
 
 ## Start or Continue
 
@@ -143,8 +148,10 @@ its identity and reports `TotalRows`. Its transient source export contains
 `review.csv` and `stats.json`; canonical outputs are `analysis/autoruns_review.csv`,
 `analysis/autoruns_potential_golden.csv`, `analysis/hunt-analysis-state.json` and
 `analysis-hunt.md`. Sample hostnames are excluded from AI input and caches. Add reviewed
-schema-10 CSV rules through `autoruns regex-import`; legacy exact promotion does not
-apply to this workflow.
+schema-10 CSV rules through the
+[GoldenDB maintenance workflow](goldendb-maintenance.md#regex-only-database-migration-and-updates)
+(`regex-build` from the canonical CSV for the repository database, `regex-import`
+for standalone databases); legacy exact promotion does not apply to this workflow.
 
 Do not write returned rows to the case unless explicit evidence extraction is
 required. Review them in the current agent context. Query metadata contains a
@@ -155,6 +162,43 @@ Configured projection aliases are applied only after branch predicates. This
 is required because VQL makes aliases visible to `WHERE`; an alias such as
 `Detection.Name AS Detection` can shadow the source `Detection` object and
 silently turn a positive-count scope into a zero-row review query.
+
+## Acquisition and Transport Sizing
+
+These runtime bounds explain progress and failure messages; the ordinary command
+needs no chunking or transport option. The complete pipeline is in
+[velociraptor-hunt-flow-analysis.md](../../../docs/reference/velociraptor-hunt-flow-analysis.md).
+
+- Hunt status/preflight projects only client/flow IDs, state, collected-row
+  totals and artifact-result names from `hunt_flows(basic_info=FALSE)`. Full
+  flow records can repeat large compiled collector requests per endpoint and
+  exceed gRPC message limits. Transport metadata in 100-row batches without a
+  total-result limit; retain nested `Flow` fields needed by status and snapshot
+  routing.
+- The default non-Autoruns path enumerates `hunt_flows(..., basic_info=FALSE)`,
+  streams profile-projected `hunt_results()` once per selected artifact,
+  accounts for every row Velociraptor exposes—including rows already available
+  from open flows—and streams token-bounded transient chunks into artifact-named
+  lanes on one hunt-scoped async scheduler and shared client. It does not
+  construct a complete hunt plan or pending prompt queue; the global row-count,
+  32 MiB, item-credit, and token-weight bounds pause acquisition.
+- For a full run, stream the complete aggregate `hunt_results()` result set,
+  including rows Velociraptor exposes from open flows. For `--update`, stream
+  each selected successful-terminal `source()` result in server-side batches of
+  at most 250 flows. Keep gRPC packets bounded and form fixed logical segments
+  locally.
+- The coordinator holds one 5,000-row or 32 MiB logical segment, one partial
+  token chunk, and at most the configured number of active analyst prompts. It
+  releases each prompt and source-row validation map immediately after
+  validation.
+- API `max_row` is a streamed-response row target, not a total-result ceiling.
+  Full/update acquisition starts at 5,000 transport rows and retries
+  message-size failures at 2,500, 1,000, 500, 100, 10, and 1. Segments stop at
+  5,000 rows or 32 MiB. A single row larger than the configured gRPC receive
+  limit remains an explicit coverage failure.
+- Managed target coverage propagates into the general flow analyzer. An ad-hoc
+  review does not require a local baseline and uses `not_assessed` as a
+  nonblocking target-execution state.
 
 ## Adaptive Reduction
 
@@ -396,6 +440,23 @@ coverage.
 
 These controls apply to generic and focused live review. The `autoruns`
 profile uses the separate source-export, AI-cache and report contract linked above.
+
+### Persistence classification and preflight
+
+`hunt-analysis-state.json` also records `source_identifiers`, normalized
+`coverage_state`, closure blockers, and `persistence_manifest`. The runtime
+classifies every live analysis file by both path and content. Row-shaped or
+oversized Markdown and JSON containing inline row arrays are rejected even when
+their filenames look allowed. Before live hunt processing, the command checks
+existing analysis files and analysis memory with the same classification rules
+used at publishing. Explicit hunts are checked before API discovery; groups are
+checked after hunt discovery but before processing any selected hunt.
+Incompatible files fail early with absolute paths, reasons, and recovery
+instructions in the terminal and sanitized progress-log diagnostics. Files are
+preserved by default. Move unrelated historical files into the case reviews
+directory outside the analysis tree, or correct their format/classification,
+then rerun. The final audit remains in place to reject incompatible outputs
+created during processing.
 
 ### Checkpoints, diagnostics, and references
 

@@ -12,7 +12,6 @@ from typing import Mapping
 
 
 CASE_ROOT_ENV = "CASE_ROOT"
-EVIDENCE_ROOT_ENV = "CASE_EVIDENCE_ROOT"
 VELO_LOCAL_API_CLIENT_ENV = "VELO_LOCAL_API_CLIENT"
 VELO_LOCAL_CONFIG_ROOT_ENV = "VELO_LOCAL_CONFIG_ROOT"
 VELO_BIN_ENV = "VELO_BIN"
@@ -237,13 +236,6 @@ def default_case_root(repo_root: Path) -> Path:
     if configured:
         return expand_home_path(configured).resolve()
     return (Path.home() / "cases").resolve()
-
-
-def default_evidence_root(repo_root: Path, investigation_id: str | None = None) -> Path:
-    configured = env_value(repo_root, EVIDENCE_ROOT_ENV)
-    if configured:
-        return expand_home_path(configured).resolve()
-    return (Path.home() / "data").resolve()
 
 
 def default_velociraptor_config_root(repo_root: Path) -> Path:

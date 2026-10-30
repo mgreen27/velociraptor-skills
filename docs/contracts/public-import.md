@@ -65,7 +65,8 @@ reviewed committed upstream revision:
 
 Add `--diff` to show destination-to-source comparisons; its output may contain
 sensitive text. Review every conflict, deletion, public-only change and policy
-finding. `--accept-resolved DESTINATION_PATH` records reviewed resolutions; do
+finding, and every `held-changed` file listed in the public `config/sync-held.tsv`:
+port that upstream change by hand and record its new reviewed fingerprint. `--accept-resolved DESTINATION_PATH` records reviewed resolutions; do
 not discard the baseline or permit policy findings wholesale.
 
 Run the same preview with the intended resolution flags, record its **sync

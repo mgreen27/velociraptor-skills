@@ -1,0 +1,18 @@
+# Managed files that keep a reviewed public adaptation. sync-repos.py reports
+# them as "held", shows their diff with --diff, and never writes them in either
+# direction, even after --accept-resolved has moved a baseline.
+# The middle column is the upstream fingerprint (the ai_skills file in this
+# layout) reviewed for the adaptation. When upstream changes, the file reports
+# "held-changed" with the new fingerprint and --apply refuses: port the change
+# by hand, then record the new fingerprint here (or remove the row).
+# public_path	reviewed_upstream_fingerprint	reason
+.codex/agents/hunt-agent.toml	sha256:95b3b16a7e0e553ca6b511858aef307992451d9f6c5cdb83d1108041e1203e35;mode:100644	Public Codex hunt agent adaptation.
+docs/model-execution.md	sha256:fe002f482668b4388ae9f2fbd3624f466c433634d1f988fbf27f3bf37f347cf9;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+skills/velociraptor-engagement-setup/references/configuration.md	sha256:54e9a0a8ba0b20d01d53dde1d29af0a94808a99f8f6f158f264f69003760e4b2;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+skills/velociraptor-host-analysis/SKILL.md	sha256:f37f1a5a9f2d2054ff463021c985cbc000f88b8784828497fe6100e699546dd1;mode:100644	The incident-response guidebook PDF is not exported.
+skills/velociraptor-mapped-client/SKILL.md	sha256:8dbefa9a45703ecfda49030d6c586677733b214e5772f576ed1eca9c4a055574;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+src/vraptor/agent/manage.py	sha256:4326514784c7f8692d976c1f943f0256dfd223a4b91e18acfed0232310037321;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+src/vraptor/settings.py	sha256:832f59a2ff5d25bf2ab62a51bbf4688d1202b7b25d76e9e1db29e338133b281f;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_agent_setup_defaults.py	sha256:9791e15fb3215c05256dccdac34c8f0a4e557a3cecee8471c3765ca32a8db4c7;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_operational_connection_options.py	sha256:7008735611ae7555a8db61c29ebe15f01000fafc6fecc23bc73377e0dd748409;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+tests/test_vraptor_settings.py	sha256:acde20cee8ca9d881a8df4113a91f8d959ef5ef37781ecfc23c296093cb08ba5;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).

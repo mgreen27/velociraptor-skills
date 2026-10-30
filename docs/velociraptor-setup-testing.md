@@ -66,7 +66,9 @@ reads, client identity, heartbeat, supervisor health and same-identity resume.
 Test missing/wrong passwords and changed ZIP rejection. Run
 `.venv/bin/python -m pytest tests/test_zip_mapping.py tests/test_export_mapping.py`.
 See [ZIP mapping](../skills/velociraptor-mapped-client/SKILL.md#velociraptor-kapefiles-zip)
-for password handling, coverage limitations and performance trade-offs.
+for password handling and coverage limitations, and
+[ZIP mapping performance](../skills/velociraptor-mapped-client/references/kapefiles-zip.md#zip-mapping-performance)
+for performance trade-offs.
 
 ## Required DetectRaptor setup gate
 

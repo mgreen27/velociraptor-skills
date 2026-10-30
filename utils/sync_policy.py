@@ -1,4 +1,4 @@
-"""Manifest, deny-pattern, path and sync-state rules for the sync and export tools.
+"""Manifest, held-file, deny-pattern, path and sync-state rules for the sync and export tools.
 
 Each loader raises PolicyError at the first problem. A caller that reports every
 problem passes an ``errors`` list instead: rows that cannot be read are skipped,
@@ -96,6 +96,44 @@ def load_manifest(path: Path, errors: list[PolicyError] | None = None) -> list[M
     if not mappings:
         report(errors, PolicyError(f"manifest has no mappings: {path}", "empty"))
     return mappings
+
+
+@dataclass(frozen=True)
+class Held:
+    reviewed: str
+    reason: str
+
+
+def load_held(path: Path, errors: list[PolicyError] | None = None) -> dict[str, Held]:
+    """Return held public paths with the upstream fingerprint last reviewed for each.
+
+    Each row is ``public_path``, the reviewed upstream fingerprint (the ai_skills
+    file in this repository's layout) and a reason. Synchronization never writes a
+    held file in either direction. A missing file holds nothing.
+    """
+    held: dict[str, Held] = {}
+    if not path.exists():
+        return held
+    for line_number, raw in table_rows(path):
+        location = f"{path}:{line_number}"
+        fields = [field.strip() for field in raw.split("\t")]
+        if len(fields) != 3 or not fields[2]:
+            report(errors, PolicyError(
+                f"{location}: expected public path, reviewed fingerprint and reason", "row", line_number))
+            continue
+        try:
+            public_path = validate_relative_path(fields[0], "held public")
+        except PolicyError as exc:
+            report(errors, PolicyError(f"{location}: {exc}", "path", line_number, fields[0]))
+            continue
+        if not FINGERPRINT.fullmatch(fields[1]):
+            report(errors, PolicyError(f"{location}: invalid reviewed fingerprint", "fingerprint", line_number))
+            continue
+        if public_path in held:
+            report(errors, PolicyError(f"{location}: duplicate held path", "duplicate", line_number))
+            continue
+        held[public_path] = Held(fields[1], fields[2])
+    return held
 
 
 def load_deny_patterns(path: Path) -> list[tuple[str, re.Pattern[str]]]:

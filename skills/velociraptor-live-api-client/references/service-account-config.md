@@ -6,12 +6,11 @@ enroll its mapped client; do not generate an endpoint YAML for live API access.
 
 ## Account setup comes before YAML generation
 
-Require explicit operator authorization before creating an API account or
-generating credentials, then pass `--provision-api` for that authorized operation.
-Inspect the effective identity first; a configured username, cached YAML, OS login
-or application default does not authorize creation. Honor no-provision, read-only
-and fetch-only requests. Existing accounts remain unchanged, and failed absence
-checks stop creation.
+Setup passes `--provision-api` under the
+[API-user provisioning rule](../../../docs/reference/velociraptor-operation-authorization.md#api-user-provisioning).
+Inspect the effective identity first; do not infer it from cached YAML, the OS
+login or application defaults. Existing accounts remain unchanged, and failed
+absence checks stop creation.
 
 Use `vraptor setup start --mode live-remote --id CASE --server-profile NAME
 --server-ip HOST --api-user USER --provision-api` for account setup. The same

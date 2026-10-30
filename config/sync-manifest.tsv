@@ -144,3 +144,4 @@ tests/test_token_usage_log.py	tests/test_token_usage_log.py	file
 tests/test_token_usage_report.py	tests/test_token_usage_report.py	file
 utils/run_analyst_agent.py	utils/run_analyst_agent.py	file
 tests/test_run_analyst_agent.py	tests/test_run_analyst_agent.py	file
+tests/test_skill_size_budget.py	tests/test_skill_size_budget.py	file

@@ -3381,26 +3381,52 @@ def _estimated_detectraptor_chunks(
     )
 
 
-def _detectraptor_transport_diagnostic(
-    exc: Exception,
+def _append_bounded(record: dict[str, Any], key: str, item: Any, limit: int) -> None:
+    record[key] = [*list(record.get(key) or []), item][-limit:]
+
+
+def _record_detectraptor_attempt(
+    record: dict[str, Any],
     *,
     stage: str,
     attempt: int,
-    elapsed_seconds: float = 0.0,
-    rows_received: int = 0,
-    retry_delay_seconds: float | None = None,
-) -> dict[str, Any]:
+    started: float,
+    rows_received: int,
+    exc: Exception | None = None,
+) -> None:
+    """Append a bounded query diagnostic; a failure also enters transport_errors."""
+    elapsed = time.monotonic() - started
+    if exc is None:
+        _append_bounded(
+            record,
+            "query_diagnostics",
+            {
+                "stage": stage,
+                "attempt": attempt,
+                "status": "succeeded",
+                "elapsed_seconds": round(elapsed, 4),
+                "rows_received": rows_received,
+            },
+            MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS,
+        )
+        return
     diagnostic = {
         "stage": stage,
         "attempt": int(attempt),
         "status": flow_analysis_runtime.grpc_status_name(exc) or "UNKNOWN",
         "error_class": type(exc).__name__,
-        "elapsed_seconds": round(max(0.0, float(elapsed_seconds)), 4),
+        "elapsed_seconds": round(max(0.0, float(elapsed)), 4),
         "rows_received": max(0, int(rows_received)),
     }
-    if retry_delay_seconds is not None:
-        diagnostic["retry_delay_seconds"] = float(retry_delay_seconds)
-    return diagnostic
+    retry_delay = flow_analysis_runtime.detectraptor_retry_delay(attempt)
+    if retry_delay is not None:
+        diagnostic["retry_delay_seconds"] = float(retry_delay)
+    _append_bounded(
+        record, "transport_errors", diagnostic, MAX_DETECTRAPTOR_TRANSPORT_ERRORS
+    )
+    _append_bounded(
+        record, "query_diagnostics", dict(diagnostic), MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS
+    )
 
 
 async def _detectraptor_transport_retry_wait(
@@ -3420,6 +3446,65 @@ async def _detectraptor_transport_retry_wait(
             flow_analysis_runtime.reconnect_query_client(api)
     await asyncio.sleep(delay)
     return delay
+
+
+async def _retry_detectraptor_read_query(
+    stage: str,
+    query: Callable[[], Any],
+    *,
+    api: Any,
+    recovery_record: dict[str, Any],
+    persist_record: Callable[[str], None],
+    reconnect_lock: asyncio.Lock | None,
+    success_rows: Callable[[Any], int],
+    fallback: Callable[[Exception], Any] | None = None,
+) -> Any:
+    """Run one replay-safe DetectRaptor read query with bounded transport retries.
+
+    Every attempt and failure is checkpointed in the recovery record. A
+    non-retryable error returns ``fallback(exc)`` without a transport diagnostic
+    when a fallback is given; otherwise it is recorded and re-raised.
+    """
+    for attempt in range(1, flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS + 1):
+        recovery_record["attempt"] = attempt
+        persist_record(stage)
+        attempt_started = time.monotonic()
+        try:
+            result = await asyncio.to_thread(query)
+            _record_detectraptor_attempt(
+                recovery_record,
+                stage=stage,
+                attempt=attempt,
+                started=attempt_started,
+                rows_received=success_rows(result),
+            )
+            return result
+        except Exception as exc:
+            retryable = flow_analysis_runtime.is_retryable_read_only_transport_error(
+                exc, rows_received=0
+            )
+            if not retryable and fallback is not None:
+                return fallback(exc)
+            _record_detectraptor_attempt(
+                recovery_record,
+                stage=stage,
+                attempt=attempt,
+                started=attempt_started,
+                rows_received=0,
+                exc=exc,
+            )
+            persist_record(stage)
+            if (
+                not retryable
+                or attempt >= flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS
+            ):
+                raise
+            await _detectraptor_transport_retry_wait(
+                api,
+                attempt=attempt,
+                reconnect_lock=reconnect_lock,
+            )
+    raise RuntimeError("DetectRaptor transport retry loop is exhausted.")
 
 
 def _detectraptor_context_source(
@@ -3523,81 +3608,35 @@ async def _analyze_detectraptor_partition(
                 query_sha256=str(census_values.get("query_sha256") or ""),
             )
         else:
-            for attempt in range(
-                1, flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS + 1
-            ):
-                recovery_record["attempt"] = attempt
-                persist_record("census")
-                attempt_started = time.monotonic()
-                try:
-                    census = await asyncio.to_thread(
-                        flow_analysis_runtime.query_detectraptor_evtx_stack_census,
-                        api,
-                        hunt_id=hunt_id,
-                        partition=partition,
-                        time_predicate=time_predicate,
-                        time_environment=time_environment,
-                        detection_regex=detection_regex,
-                        query_timeout_seconds=query_timeout_seconds,
-                    )
-                    recovery_record["query_diagnostics"] = [
-                        *list(recovery_record.get("query_diagnostics") or []),
-                        {
-                            "stage": "census",
-                            "attempt": attempt,
-                            "status": "succeeded",
-                            "elapsed_seconds": round(
-                                time.monotonic() - attempt_started, 4
-                            ),
-                            "rows_received": 1,
-                        },
-                    ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
-                    break
-                except Exception as exc:
-                    retryable = flow_analysis_runtime.is_retryable_read_only_transport_error(
-                        exc, rows_received=0
-                    )
-                    if retryable:
-                        retry_delay = flow_analysis_runtime.detectraptor_retry_delay(
-                            attempt
-                        )
-                        recovery_record["transport_errors"] = [
-                            *list(recovery_record.get("transport_errors") or []),
-                            _detectraptor_transport_diagnostic(
-                                exc,
-                                stage="census",
-                                attempt=attempt,
-                                elapsed_seconds=time.monotonic() - attempt_started,
-                                rows_received=0,
-                                retry_delay_seconds=retry_delay,
-                            ),
-                        ][-MAX_DETECTRAPTOR_TRANSPORT_ERRORS:]
-                        recovery_record["query_diagnostics"] = [
-                            *list(recovery_record.get("query_diagnostics") or []),
-                            dict(recovery_record["transport_errors"][-1]),
-                        ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
-                        persist_record("census")
-                        if (
-                            attempt
-                            < flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS
-                        ):
-                            await _detectraptor_transport_retry_wait(
-                                api,
-                                attempt=attempt,
-                                reconnect_lock=reconnect_lock,
-                            )
-                            continue
-                        raise
-                    stack_record.update(
-                        {
-                            "mode": "direct_fallback",
-                            "fallback_reason": (
-                                "census_failed_" + type(exc).__name__.casefold()
-                            ),
-                        }
-                    )
-                    census = None
-                    break
+
+            def census_fallback(exc: Exception) -> None:
+                stack_record.update(
+                    {
+                        "mode": "direct_fallback",
+                        "fallback_reason": (
+                            "census_failed_" + type(exc).__name__.casefold()
+                        ),
+                    }
+                )
+
+            census = await _retry_detectraptor_read_query(
+                "census",
+                lambda: flow_analysis_runtime.query_detectraptor_evtx_stack_census(
+                    api,
+                    hunt_id=hunt_id,
+                    partition=partition,
+                    time_predicate=time_predicate,
+                    time_environment=time_environment,
+                    detection_regex=detection_regex,
+                    query_timeout_seconds=query_timeout_seconds,
+                ),
+                api=api,
+                recovery_record=recovery_record,
+                persist_record=persist_record,
+                reconnect_lock=reconnect_lock,
+                success_rows=lambda _census: 1,
+                fallback=census_fallback,
+            )
         if census is not None:
             use_stack = (
                 census.reduced_row_count
@@ -3820,22 +3859,14 @@ async def _analyze_detectraptor_partition(
             )
             if not retryable:
                 raise
-            retry_delay = flow_analysis_runtime.detectraptor_retry_delay(attempt)
-            recovery_record["transport_errors"] = [
-                *list(recovery_record.get("transport_errors") or []),
-                _detectraptor_transport_diagnostic(
-                    exc,
-                    stage="initial_analysis",
-                    attempt=attempt,
-                    elapsed_seconds=time.monotonic() - attempt_started,
-                    rows_received=attempt_rows,
-                    retry_delay_seconds=retry_delay,
-                ),
-            ][-MAX_DETECTRAPTOR_TRANSPORT_ERRORS:]
-            recovery_record["query_diagnostics"] = [
-                *list(recovery_record.get("query_diagnostics") or []),
-                dict(recovery_record["transport_errors"][-1]),
-            ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
+            _record_detectraptor_attempt(
+                recovery_record,
+                stage="initial_analysis",
+                attempt=attempt,
+                started=attempt_started,
+                rows_received=attempt_rows,
+                exc=exc,
+            )
             persist_record("initial_analysis")
             if attempt >= flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS:
                 raise
@@ -3851,16 +3882,13 @@ async def _analyze_detectraptor_partition(
         partition_stats = attempt_stats
         acquired_model_rows = attempt_rows
         final_pool_status = attempt_pool_status
-        recovery_record["query_diagnostics"] = [
-            *list(recovery_record.get("query_diagnostics") or []),
-            {
-                "stage": "initial_analysis",
-                "attempt": attempt,
-                "status": "succeeded",
-                "elapsed_seconds": round(time.monotonic() - attempt_started, 4),
-                "rows_received": attempt_rows,
-            },
-        ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
+        _record_detectraptor_attempt(
+            recovery_record,
+            stage="initial_analysis",
+            attempt=attempt,
+            started=attempt_started,
+            rows_received=attempt_rows,
+        )
         break
     else:  # pragma: no branch - bounded loop either succeeds or raises
         if not reuse_initial:
@@ -3997,77 +4025,26 @@ async def _analyze_detectraptor_partition(
         persist_record("context_hydration")
         context_by_ref: dict[str, list[dict[str, Any]]] = {}
         if selected_payloads:
-            for attempt in range(
-                1, flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS + 1
-            ):
-                recovery_record["attempt"] = attempt
-                persist_record("context_hydration")
-                attempt_started = time.monotonic()
-                try:
-                    context_by_ref, context_query_hashes = (
-                        await asyncio.to_thread(
-                            flow_analysis_runtime.query_detectraptor_evtx_stack_context,
-                            api,
-                            hunt_id=hunt_id,
-                            partition=partition,
-                            evidence_by_group=selected_payloads,
-                            time_predicate=time_predicate,
-                            time_environment=time_environment,
-                            detection_regex=detection_regex,
-                            query_timeout_seconds=query_timeout_seconds,
-                        )
-                    )
-                    recovery_record["query_diagnostics"] = [
-                        *list(recovery_record.get("query_diagnostics") or []),
-                        {
-                            "stage": "context_hydration",
-                            "attempt": attempt,
-                            "status": "succeeded",
-                            "elapsed_seconds": round(
-                                time.monotonic() - attempt_started, 4
-                            ),
-                            "rows_received": sum(
-                                len(rows) for rows in context_by_ref.values()
-                            ),
-                        },
-                    ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
-                    break
-                except Exception as exc:
-                    retryable = (
-                        flow_analysis_runtime.is_retryable_read_only_transport_error(
-                            exc, rows_received=0
-                        )
-                    )
-                    retry_delay = flow_analysis_runtime.detectraptor_retry_delay(
-                        attempt
-                    )
-                    recovery_record["transport_errors"] = [
-                        *list(recovery_record.get("transport_errors") or []),
-                        _detectraptor_transport_diagnostic(
-                            exc,
-                            stage="context_hydration",
-                            attempt=attempt,
-                            elapsed_seconds=time.monotonic() - attempt_started,
-                            rows_received=0,
-                            retry_delay_seconds=retry_delay,
-                        ),
-                    ][-MAX_DETECTRAPTOR_TRANSPORT_ERRORS:]
-                    recovery_record["query_diagnostics"] = [
-                        *list(recovery_record.get("query_diagnostics") or []),
-                        dict(recovery_record["transport_errors"][-1]),
-                    ][-MAX_DETECTRAPTOR_QUERY_DIAGNOSTICS:]
-                    persist_record("context_hydration")
-                    if (
-                        not retryable
-                        or attempt
-                        >= flow_analysis_runtime.DETECTRAPTOR_TRANSPORT_ATTEMPTS
-                    ):
-                        raise
-                    await _detectraptor_transport_retry_wait(
-                        api,
-                        attempt=attempt,
-                        reconnect_lock=reconnect_lock,
-                    )
+            context_by_ref, context_query_hashes = await _retry_detectraptor_read_query(
+                "context_hydration",
+                lambda: flow_analysis_runtime.query_detectraptor_evtx_stack_context(
+                    api,
+                    hunt_id=hunt_id,
+                    partition=partition,
+                    evidence_by_group=selected_payloads,
+                    time_predicate=time_predicate,
+                    time_environment=time_environment,
+                    detection_regex=detection_regex,
+                    query_timeout_seconds=query_timeout_seconds,
+                ),
+                api=api,
+                recovery_record=recovery_record,
+                persist_record=persist_record,
+                reconnect_lock=reconnect_lock,
+                success_rows=lambda result: sum(
+                    len(rows) for rows in result[0].values()
+                ),
+            )
         recovery_record["query_hashes"]["context_hydration"] = context_query_hashes
 
         partition_source = flow_analysis_runtime.detectraptor_evtx_partition_source(

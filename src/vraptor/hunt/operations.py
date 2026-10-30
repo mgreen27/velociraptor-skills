@@ -4213,11 +4213,6 @@ def parse_args(
         ),
     )
     ensure_cmd.add_argument(
-        "--no-export",
-        action="store_true",
-        help="Deprecated no-op. Result extraction now uses explicit export-results or download-results commands.",
-    )
-    ensure_cmd.add_argument(
         "--verbose-output",
         action="store_true",
         help=(
@@ -4246,11 +4241,6 @@ def parse_args(
         action="append",
         default=[],
         help="Select one saved profile artifact with --profile, or load the current saved single-artifact hunt by artifact label.",
-    )
-    status_cmd.add_argument(
-        "--no-export",
-        action="store_true",
-        help="Deprecated no-op. Result extraction now uses explicit export-results or download-results commands.",
     )
 
     stop_cmd = subparsers.add_parser("stop", help="Stop a specific hunt and verify the server reports STOPPED")

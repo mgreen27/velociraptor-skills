@@ -158,8 +158,12 @@ explicit. It then resolves and hydrates one immutable execution route. Every
 worker in that operation receives the same object; downstream code does not
 read analyst environment variables again.
 
-Velociraptor analysis and `run_analyst_agent.py` do not expose provider, model,
-reasoning, transport, timeout, retry, or concurrency CLI overrides. Execution
+Velociraptor analysis and `run_analyst_agent.py` do not expose provider,
+transport, provider timeout, provider retry, or concurrency CLI overrides.
+Analysis commands accept run-only configuration-file, profile, model,
+reasoning-effort and token-limit overrides, listed in
+[analysis model overrides](../model-execution.md#analysis-model-overrides);
+`run_analyst_agent.py` accepts none of them. Execution
 manifests record the actual resolved provider/model route. Behavioral analysis
 routing is separate and never selects a provider model.
 

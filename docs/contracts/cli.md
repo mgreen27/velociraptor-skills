@@ -1,10 +1,11 @@
 # CLI and existing-state contract
 
 Use `vraptor`; `dfir` remains a legacy alias of the same entry point, kept for
-compatibility. The CLI exposes `query`, `clients`, `artifacts`, `collect`, `analyze`, `hunt`,
-`export`, `ai`, and `tools prep`. `agent` remains a compatible alias
-for `ai`. The advanced `setup`, `config`,
-`mapped`, `autoruns` and `logs` groups retain their existing lower-level commands.
+compatibility. The CLI exposes `query`, `clients`, `artifacts`, `collect`, `analyze`,
+`summarize`, `analysis-results`, `hunt`, `export`, `reports`, `ai`, and
+`tools prep`. `agent` remains a compatible alias for `ai`. The advanced
+`setup`, `config`, `mapped`, `autoruns` and `logs` groups retain their existing
+lower-level commands.
 `setup` also provides shared configuration and three managed startup journeys.
 `--server` aliases `--server-profile`; `--profile` remains an analysis profile.
 `--client`, `--hunt`, `--request` and query `--file` alias the existing ID/file flags.
