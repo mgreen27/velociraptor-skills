@@ -46,7 +46,6 @@ def build_saved_request_command(
         )
     command = [
         str(repo_root / "dfir"),
-        "velociraptor",
         "collect",
         "analyze",
         "--case-root",

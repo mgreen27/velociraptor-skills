@@ -277,7 +277,7 @@ separate headings. Enter accepts the displayed value:
 | Reasoning effort | Model-specific options include `xhigh` where supported; recognized Claude models default to `medium` when no effort is saved/inherited. Enter keeps the displayed value; Haiku has no effort setting |
 | Timeout seconds | Request deadline; a new profile suggests `600` |
 | Maximum concurrency | Maximum active requests per analysis scope; start conservatively for your quota |
-| Maximum output tokens | Known model recommendation: Haiku 4.5 `32000` (model maximum `64000`); other known models use their output maximum; OpenAI/Azure fallback `128000` |
+| Maximum output tokens | Known model recommendation: Haiku 4.5 `64000` (model maximum; input defaults to `120000` within 200000 context); other known models use their output maximum; OpenAI/Azure fallback `128000` |
 | Maximum input tokens | Maximum remaining standard-price capacity after output; OpenAI/Azure fallback `272000`. Enter a smaller allowed number if required |
 
 New direct OpenAI/Azure profiles suggest a model and reasoning effort. Check these

@@ -1,6 +1,6 @@
 # Windows Artifact Analysis
 
-Source PDF: `IR-Guidebook-Final.pdf`
+Source PDF: `IR-Guidebook-Final.pdf` (not included in every checkout)
 
 Purpose: preserve the investigation nuance from the Microsoft Incident
 Response artifact guide in a repo-native format that future agents can read

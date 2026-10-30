@@ -115,7 +115,7 @@ adjustments; runtime environment precedence is unchanged.
 Input has a 100000-token minimum when the available maximum is at least 100000;
 smaller available contexts retain a lower minimum. Prompt brackets show the
 calculated default, e.g. `Maximum input tokens [872000] (Enter to keep):`.
-Haiku 4.5 recommends 32000 output (model maximum 64000) and 168000 input;
+Haiku 4.5 recommends 64000 output and 120000 input within 200000 context;
 Sonnet 5 recommends 128000 output and 872000 input. The fixed 25% context reduction
 is removed from setup and runtime; evidence reserves remain inside input. Known
 models record their context on new and existing profiles, preserving explicit

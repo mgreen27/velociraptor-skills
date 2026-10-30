@@ -17,10 +17,12 @@ for compatibility.
 
 Run bare `vraptor setup configure` in a terminal and accept
 `Configure AI analyst settings [Y/n]:` to open the AI wizard after operational
-settings are saved. Enter starts AI setup; No skips it. Setting flags select targeted,
-non-interactive configuration and do not open the AI wizard. Python dependencies
-must already be installed. No repository `.env` is required; select a credential
-file or use process credentials when the chosen provider needs them.
+settings are saved. Enter starts AI setup; No skips it.
+
+`setup configure` setting flags select targeted, non-interactive configuration and
+do not open the AI wizard. Python dependencies must already be installed. No
+repository `.env` is required; process environment and optional credential dotenv
+files can override saved profiles. Inspect `vraptor ai config` for sources.
 
 ```sh
 ./vraptor ai setup
@@ -599,14 +601,6 @@ Model listings are bounded to one page/200 records and report completeness.
 Diagnostics never print keys, tokens or raw provider errors.
 
 ## Validation, qualification and rollout
-
-```sh
-.venv/bin/python -m pytest -q tests/test_ai_harness_setup.py tests/test_agent_profile_schema.py tests/test_agent_setup.py tests/test_agent_setup_defaults.py tests/test_additional_agent_providers.py \
-  tests/test_agent_analysis_defaults.py \
-  tests/test_agent_config.py tests/test_agent_providers.py tests/test_agent_runtime.py \
-  tests/test_analysis_limits.py tests/test_agent_settings_environment.py
-.venv/bin/python -m pytest -q tests/test_public_layout.py tests/core
-```
 
 Tests use real SDK clients with mock HTTP responses and mocked Claude execution;
 they do not validate real account access or forensic model quality. Before approving

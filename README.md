@@ -256,7 +256,13 @@ The shared export uses these folder mappings:
 | `packages/vraptor/docs/reference` | `docs/reference` |
 | `packages/vraptor/pyproject.toml` | `pyproject.toml` |
 
-The manifest is `config/sync-manifest.tsv`; `.sync-state.json` records the
+The manifest is `config/sync-manifest.tsv`. An optional fourth column lists
+comma-separated globs that a tree row skips, such as private markers or bulky
+assets. Imports rewrite ai_skills package paths in text to this layout
+(`packages/vraptor/src/vraptor` to `src/vraptor`, and likewise for
+`tests/core`, `docs/` and package-doc links to repository-root targets), and
+both directions compare in this layout. `to-ai --apply` refuses files that contain
+layout paths, so port those to ai_skills by hand. `.sync-state.json` records the
 content hash at the last successful synchronization. The baseline is local to
 each checkout and Git-ignored; keep it locally to preserve change tracking.
 Fresh clones start without a baseline. The first reviewed `--apply` creates it;

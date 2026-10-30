@@ -7,7 +7,7 @@ Offline settings/setup regression checks (no live endpoint or provisioning):
   tests/test_operational_connection_options.py tests/test_vraptor_lifecycle.py \
   tests/test_setup_config_transfer.py tests/test_reset_vraptor_config.py \
   tests/test_agent_profile_schema.py tests/test_agent_setup.py \
-  tests/test_agent_setup_defaults.py tests/test_agent_settings_environment.py \
+  tests/test_agent_setup_defaults.py tests/test_agent_settings_environment.py
 ```
 
 These cover connection-default precedence/source reporting, API-user prompting,
@@ -564,12 +564,11 @@ vtest setup stop --id test-remote --mapping-id wkstn01
 vtest setup stop --id test-remote --mapping-id wkstn05
 ```
 
-Offline regression checks from the `ai_skills` checkout:
+Offline regression checks from the repository checkout:
 
 ```sh
 .venv/bin/python -m pytest tests/test_remote_config_privileges.py \
-  tests/test_remote_config_sudo.py \
-  tests/test_velociraptor_live_api_client_sh.py tests/test_vraptor_setup.py \
+  tests/test_remote_config_sudo.py tests/test_vraptor_setup.py \
   tests/test_engagement_state.py
 ```
 

@@ -160,12 +160,6 @@ changing configuration does not rewrite an existing caller assessment.
 
 ## Validation
 
-```sh
-PYTHONPATH=src .venv/bin/python -m pytest -q \
-  tests/test_reporting_config.py tests/test_report_priority.py \
-  tests/test_reporting_selection.py tests/test_report_publication.py
-```
-
 Regressions cover configuration precedence, priority arriving last, deterministic
 selection, legacy priority, overflow, byte boundaries, source preservation and
 zero-inference re-rendering.

@@ -17,15 +17,19 @@ For older checkouts without a sync manifest, the legacy migration mappings are:
 
 For current checkouts, the public `config/sync-manifest.tsv` is the authoritative
 export inventory, including explicitly mapped skills, utilities and regression
-tests. The exporter reads Git-visible working-tree files and current baseline
-keys before considering legacy keys. Ignored credentials/generated files,
+tests. Tree rows may list exclude globs in an optional fourth column (the
+`packages/vraptor/src/vraptor` row excludes `integrations/*`), and imports rewrite
+upstream `packages/vraptor` source, test and docs paths to the public layout.
+Export staging applies the same exclusions and rewrites. The exporter reads
+Git-visible working-tree files and current baseline keys before considering
+legacy keys. Ignored credentials/generated files,
 retired utilities and broad utility trees are excluded or rejected. Export staging
 never applies files or accepts fingerprints; public installer, launcher, CI,
 configuration and sync-tool adaptations stay owned by the public checkout.
 
 `module-map.json` records the old-to-new Python module names. The exporter uses
 it to map existing public files and accepted baseline keys into the new groups;
-packaged resource paths are mapped separately without rewriting their bytes.
+packaged resource paths are mapped separately.
 
 The metadata is deliberately shared. Keep additional public dependencies in
 separate requirements files or deliberately coordinate future extras upstream.
@@ -48,7 +52,8 @@ every path, SHA-256, mode, original baseline hash, path mapping and plan hash.
 
 Review all of:
 
-- `source/`: mapped shared content, laid out at its public destination paths.
+- `source/`: mapped shared content in its public view, laid out at its public
+  destination paths.
 - `destination-layout/`: current public bytes at the proposed new locations,
   without namespace rewrites or loss of public adaptations.
 - `export-plan.json`: exact path conversions and source/destination/base
@@ -159,9 +164,8 @@ sync, not by manually editing accepted fingerprints. Reverse-sync deletions need
 independent review because a private package may retain modules absent publicly.
 
 The private `packages/vraptor/src/vraptor/integrations/__init__.py` is a retained
-package marker. Its absence publicly does not authorize a reverse-sync deletion.
-Review that ownership difference independently; never use blanket `--allow-delete`
-to bypass it. Merge CSV evidence-preservation tests with existing large-field and
+package marker. The manifest excludes it, so sync never pairs it; its absence
+publicly does not authorize deleting it upstream. Merge CSV evidence-preservation tests with existing large-field and
 truncation coverage instead of replacing either suite.
 
 Public sync and validation now use `utils/sync-repos.py` and
