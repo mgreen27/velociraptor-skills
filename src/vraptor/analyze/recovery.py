@@ -238,6 +238,8 @@ def task_diagnostics(record: dict) -> dict:
             "authentication": "Provider authentication failed. Check credential availability without logging credentials.",
             "output_too_large": "The response exceeded the output budget. Reduce the requested detail or adjust the model-compatible output budget.",
             "output_limit_reached": "The provider stopped at the output-token limit. Reduce the requested detail or increase the model-compatible output budget.",
+            "context_window_exceeded": "Input plus output reached the model context window. Lower the input or output budget; the provider counts more tokens than the local estimate.",
+            "refusal": "The model declined the request. Review the submitted evidence; repeating the same request is unlikely to change the result.",
             "cancelled": "The analysis was cancelled. Confirm the stop reason before resuming the same request.",
             "succeeded": "The response passed validation.",
         }

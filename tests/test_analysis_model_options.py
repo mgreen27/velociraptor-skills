@@ -194,6 +194,22 @@ def test_route_overrides_are_run_only(tmp_path):
     assert result.maximum_input_tokens == 168000
 
 
+def test_haiku_alias_run_override_keeps_effort(tmp_path):
+    path = configuration(tmp_path)
+    execution, result = resolve(
+        path, "--model", "haiku", "--reasoning-effort", "low", "--max-input-tokens", "max"
+    )
+    assert execution.route.model == "haiku"
+    assert execution.route.reasoning_effort == "low"
+    assert result.maximum_input_tokens == 100000
+
+
+def test_haiku_5_5_input_cannot_exceed_standard_price_tier(tmp_path):
+    path = configuration(tmp_path, model="claude-haiku-5-5")
+    with pytest.raises(ValueError, match="between 100000 and 100000"):
+        resolve(path, "--max-input-tokens", "100001", "--max-output-tokens", "max")
+
+
 @pytest.mark.parametrize("value", ["10", "99999", "872001"])
 def test_input_range_rejects_out_of_bounds(tmp_path, value):
     path = configuration(tmp_path)

@@ -80,7 +80,8 @@ that step; `ai login --harness claude_code` remains available separately.
 Before an interactive model prompt, setup lists the selected provider's model
 examples in aligned columns with short descriptions. OpenAI and Codex show GPT-6,
 GPT-6.1 and GPT-5.6 examples; Anthropic API and Claude Code show Claude examples. Claude
-Code also shows its `sonnet`, `opus`, `haiku` and `fable` aliases. Azure asks for
+Code also shows its `sonnet`, `opus`, `haiku`, `fable`, `best`, `sonnet[1m]`,
+`opus[1m]` and `opusplan` aliases. Azure asks for
 your actual deployment name. These are offline suggestions, not an account model
 inventory or an allowlist. You can enter another supported ID, or press Enter to
 retain the displayed model. Supplying `--model` skips the prompt and suggestions.
@@ -110,10 +111,13 @@ Claude API and Claude Code profiles accept `low`, `medium`, `high`, `xhigh`, `ma
 The selected model must support the value: Fable 5/5.1, Opus 5/5.5, Sonnet 5/5.5,
 Haiku 5.5 and Opus 4.7/4.8 support all five; Opus/Sonnet 4.6 support `low`,
 `medium`, `high`, `max`; Opus 4.5 supports `low`, `medium`, `high`. Haiku 4.5 does
-not expose effort, so leave it unset. Enter preserves saved settings; displaying the helper
+not expose effort, so leave it unset. Direct API setup rejects a level the listed
+model lacks; Claude Code lowers it to the highest supported level. Enter preserves saved settings; displaying the helper
 does not alter them. Recognized effort-capable Claude models default to `medium`
 only when CLI, profile, shared and native settings supply no effort. This applies
 to interactive and non-interactive setup, including inherited Claude models.
+`medium` is the API default for Opus 5.5 and Haiku 5.5 and one level below the
+`high` API default of Sonnet 5.5 and Fable 5.1.
 Haiku 4.5, unsupported older versions and unknown IDs receive no automatic effort.
 `--reasoning-effort` skips the prompt and helper.
 Reference: [OpenAI model specifications](https://developers.openai.com/api/docs/models),
@@ -282,7 +286,9 @@ Claude aliases `haiku`, `sonnet`, `opus`, and `fable` use dated offline referenc
 for the default Anthropic-hosted models (checked **2026-10-30**): Haiku 5.5,
 Sonnet 5.5, Opus 5.5, and Fable 5.1 respectively. All four use 1000000 context /
 128000 maximum and default output. Haiku 5.5 input defaults to its 100000
-standard-price ceiling; the other three default to 872000 input.
+standard-price ceiling; the other three default to 872000 input. `best`,
+`sonnet[1m]`, `opus[1m]` and `opusplan` use the Fable 5.1, Sonnet 5.5, Opus 5.5
+and Sonnet 5.5 references; their limits match.
 The alias is retained for execution. The wizard and JSON `alias_reference_model`
 identify the reference rather than claiming live alias resolution. A remapped alias
 or another hosting provider can have different limits: select the exact supported
@@ -588,7 +594,8 @@ Setup and runtime use the full declared model context; there is no fixed 25%
 Anthropic context reduction. Instruction, prior-context and safety reserves remain
 inside the input budget when deriving evidence capacity. Local tiktoken counts remain
 estimates and are not the provider's tokenizer; Claude counts typical text as
-about 1.15–1.35 times as many tokens. Validate limits with representative
+about 1.15–1.35 times as many tokens. A Claude stop at the context window is
+reported as `context_window_exceeded` and a safety refusal as `refusal`. Validate limits with representative
 inputs. Host, hunt and standalone
 analysis use the bounded envelope; runtime admission checks remain the final guard.
 

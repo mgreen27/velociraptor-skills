@@ -7,11 +7,11 @@
 # by hand, then record the new fingerprint here (or remove the row).
 # public_path	reviewed_upstream_fingerprint	reason
 .codex/agents/hunt-agent.toml	sha256:95b3b16a7e0e553ca6b511858aef307992451d9f6c5cdb83d1108041e1203e35;mode:100644	Public Codex hunt agent adaptation.
-docs/model-execution.md	sha256:c32c68b91f1fca8ce9e65e533f7dd1ae9c4250e72764ab132217ed21aafd4a4c;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
-skills/velociraptor-engagement-setup/references/configuration.md	sha256:d229a3da1b7ae549d77f93418a368bc9fe15ac9cc33fdd98cb5e8cf1b2cda174;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+docs/model-execution.md	sha256:7002724758e971090f63ae9d3cb894e06f1f1269539a2a8891b9e8c7a33131b2;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+skills/velociraptor-engagement-setup/references/configuration.md	sha256:c1f70137568d041ed64e56c2de09db9d159e1cdafb7132a82ad80e2bc2a61acd;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 skills/velociraptor-host-analysis/SKILL.md	sha256:f37f1a5a9f2d2054ff463021c985cbc000f88b8784828497fe6100e699546dd1;mode:100644	The incident-response guidebook PDF is not exported.
 skills/velociraptor-mapped-client/SKILL.md	sha256:8dbefa9a45703ecfda49030d6c586677733b214e5772f576ed1eca9c4a055574;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
-src/vraptor/agent/manage.py	sha256:f2d90e56ab8d2752f82dca7b151eff14163529a1d2b3d6dd0dc98b8be0bcabfa;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+src/vraptor/agent/manage.py	sha256:723d4b5ecc5e62541ad874343d627a7318b97f3124be69160fedcae39b574fa4;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 src/vraptor/settings.py	sha256:832f59a2ff5d25bf2ab62a51bbf4688d1202b7b25d76e9e1db29e338133b281f;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 tests/test_agent_setup_defaults.py	sha256:9791e15fb3215c05256dccdac34c8f0a4e557a3cecee8471c3765ca32a8db4c7;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 tests/test_operational_connection_options.py	sha256:7008735611ae7555a8db61c29ebe15f01000fafc6fecc23bc73377e0dd748409;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).

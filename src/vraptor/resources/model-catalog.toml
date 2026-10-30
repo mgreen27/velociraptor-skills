@@ -102,6 +102,13 @@ sonnet = "claude-sonnet-5-5"
 opus = "claude-opus-5-5"
 haiku = "claude-haiku-5-5"
 fable = "claude-fable-5-1"
+# Opus 5.5 where Fable is unavailable; both have the same limits and efforts.
+best = "claude-fable-5-1"
+# Already the native 1M window of Sonnet/Opus 5.5.
+"sonnet[1m]" = "claude-sonnet-5-5"
+"opus[1m]" = "claude-opus-5-5"
+# Opus plans and Sonnet executes; analysis requests are execution.
+opusplan = "claude-sonnet-5-5"
 
 [[providers.anthropic.efforts]]
 label = "Fable 5/5.1, Opus 5/5.5, Sonnet 5/5.5, Haiku 5.5, Opus 4.7/4.8"

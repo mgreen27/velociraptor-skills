@@ -813,6 +813,17 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
         or args.reasoning_effort is not None
         or "reasoning_effort" in profile
     ):
+        # The Messages API rejects an unsupported level; Claude Code lowers it.
+        levels = (
+            effort_levels(provider, selected_model)
+            if provider == "anthropic" and not args.from_harness
+            else None
+        )
+        if effort and levels and effort not in levels:
+            raise RuntimeError(
+                f"{effort_label(provider, selected_model)} supports reasoning effort "
+                + ", ".join(levels)
+            )
         profile["reasoning_effort"] = effort
     for option, label, fallback in (
         ("timeout_seconds", "Timeout seconds", 600),
@@ -875,7 +886,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
             )
             if reference.standard_price_input_ceiling < reference.context_tokens:
                 print(
-                    "  Input above the standard-price ceiling has a long-context surcharge.",
+                    "  Prompts above the standard-price ceiling are billed at higher rates for the whole request.",
                     file=sys.stderr,
                 )
             else:

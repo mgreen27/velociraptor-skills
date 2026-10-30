@@ -398,6 +398,25 @@ def test_effort_options_precede_prompt_and_preserve_saved_values(
     assert profile.get("reasoning_effort") == ("low" if saved_effort else None)
 
 
+def test_claude_code_keeps_effort_it_lowers_itself(tmp_path):
+    # Claude Code runs an unsupported level as the highest supported one.
+    report = manage.setup(
+        setup_args(
+            tmp_path,
+            "--from-harness",
+            "claude_code",
+            "--model",
+            "claude-opus-4-6",
+            "--reasoning-effort",
+            "xhigh",
+        )
+    )
+    profile = sources.read_config(tmp_path / "analyst.toml")["profiles"][
+        report["execution_profile"]
+    ]
+    assert profile["reasoning_effort"] == "xhigh"
+
+
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize(
@@ -518,7 +537,7 @@ def test_explicit_effort_skips_helper_and_unsupported_claude_effort_still_fails(
     before = (tmp_path / "analyst.toml").read_bytes()
     with (
         mock.patch("builtins.input", return_value=""),
-        pytest.raises(RuntimeError, match="Anthropic reasoning_effort"),
+        pytest.raises(RuntimeError, match="supports reasoning effort low, medium"),
     ):
         manage.setup(
             setup_args(
@@ -527,6 +546,23 @@ def test_explicit_effort_skips_helper_and_unsupported_claude_effort_still_fails(
                 "anthropic",
                 "--model",
                 "claude-sonnet-5",
+                "--reasoning-effort",
+                "none",
+            )
+        )
+    assert (tmp_path / "analyst.toml").read_bytes() == before
+    # Unlisted models still get the generic Claude effort check.
+    with (
+        mock.patch("builtins.input", return_value=""),
+        pytest.raises(RuntimeError, match="Anthropic reasoning_effort"),
+    ):
+        manage.setup(
+            setup_args(
+                tmp_path,
+                "--provider",
+                "anthropic",
+                "--model",
+                "custom-claude",
                 "--reasoning-effort",
                 "none",
             )
@@ -754,6 +790,8 @@ def test_ai_help_is_accessible_without_config(tmp_path, command):
             and "Claude / Anthropic reasoning efforts" in output
         )
         assert "none, low, medium, high, xhigh, max" in output
+        assert "  Haiku 4.5: no effort setting" in output
+        assert "Haiku 5.5, Opus 4.7/4.8: low, medium, high, xhigh, max" in output
         for title in (
             "Profile selection:",
             "Connection and authentication:",

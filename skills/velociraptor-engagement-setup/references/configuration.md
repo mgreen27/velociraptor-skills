@@ -169,8 +169,8 @@ the resolved values and sources with `vraptor ai config`.
 - Setup selects output first and shows the exact remaining input maximum. `max`
   or `auto` at a prompt fills that field's available capacity. Prompt brackets
   show the calculated default, e.g. `Maximum input tokens [872000] (Enter to keep):`.
-- Input has a 100000-token minimum when the available maximum is at least
-  100000; smaller available contexts retain a lower minimum.
+- Input must be at least 100000 tokens and output at least 32000; a model or
+  deployment that cannot hold both is rejected.
 - The default `--auto-token-budgets` replaces saved budgets with those model
   output recommendations and reference input defaults.
   `--no-auto-token-budgets` retains saved budgets within the allowed range, with a

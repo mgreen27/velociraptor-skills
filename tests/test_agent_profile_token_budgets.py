@@ -296,7 +296,10 @@ def test_claude_alias_wizard_uses_bounded_reference(tmp_path, capsys, model, sav
     assert "999,990" not in display
 
 
-@pytest.mark.parametrize("model", ["haiku", "sonnet", "opus", "fable"])
+@pytest.mark.parametrize(
+    "model",
+    ["haiku", "sonnet", "opus", "fable", "best", "sonnet[1m]", "opus[1m]", "opusplan"],
+)
 def test_claude_alias_interactive_max_respects_output_cap(tmp_path, model):
     with (
         mock.patch("os.isatty", return_value=True),
@@ -365,6 +368,43 @@ def test_haiku_4_5_setup_rejects_explicit_effort_before_writing(tmp_path, model)
     with pytest.raises(RuntimeError, match="Haiku 4.5 does not support"):
         setup(path, "anthropic", "--model", model, "--reasoning-effort", "medium")
     assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "model,effort,levels",
+    [
+        ("claude-opus-4-6", "xhigh", "low, medium, high, max"),
+        ("claude-sonnet-4-6", "xhigh", "low, medium, high, max"),
+        ("claude-opus-4-5-20251101", "max", "low, medium, high"),
+    ],
+)
+def test_api_setup_rejects_effort_outside_model_ladder(tmp_path, model, effort, levels):
+    path = tmp_path / "agents.toml"
+    with pytest.raises(RuntimeError, match=f"supports reasoning effort {levels}$"):
+        setup(path, "anthropic", "--model", model, "--reasoning-effort", effort)
+    assert not path.exists()
+
+
+def test_haiku_5_5_wizard_shows_price_tier_and_bounds_input(tmp_path, capsys):
+    path = tmp_path / "agents.toml"
+    with (
+        mock.patch("os.isatty", return_value=True),
+        mock.patch("builtins.input", return_value=""),
+    ):
+        setup(path, "anthropic", "--model", "claude-haiku-5-5")
+    display = capsys.readouterr().err
+    for line in (
+        "Published context: 1,000,000 tokens",
+        "Standard-price input ceiling: 100,000 tokens",
+        "Maximum model output: 128,000 tokens",
+        "Reference defaults: 100,000 input / 128,000 output",
+        "Prompts above the standard-price ceiling are billed at higher rates for the whole request.",
+    ):
+        assert line in display
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="between 100000 and 100000"):
+        setup(path, "anthropic", "--max-input-tokens", "100001")
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("model", ["haiku", "claude-haiku-5-5"])

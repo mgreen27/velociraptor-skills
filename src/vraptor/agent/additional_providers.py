@@ -48,6 +48,15 @@ def _message_usage_snapshot(known: dict[str, Any], event: Any) -> AgentUsage:
     )
 
 
+# Unsuccessful Claude stop reasons; any other non-end_turn stop is incomplete.
+_STOP_CLASSIFICATIONS = {
+    "max_tokens": "output_limit_reached",
+    # Claude 4.5+ accepts input + max_tokens over the window and stops here.
+    "model_context_window_exceeded": "context_window_exceeded",
+    "refusal": "refusal",
+}
+
+
 class AnthropicMessagesAdapter(_BaseAdapter):
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -97,11 +106,7 @@ class AnthropicMessagesAdapter(_BaseAdapter):
         request_id = str(_get(response, "_request_id", "") or _get(response, "id", ""))
         usage = _usage(_get(response, "usage"))
         if reason != "end_turn":
-            classification = (
-                "output_limit_reached"
-                if reason == "max_tokens"
-                else "incomplete_response"
-            )
+            classification = _STOP_CLASSIFICATIONS.get(reason, "incomplete_response")
             raise AgentProviderException(
                 AgentError(
                     classification,
@@ -367,10 +372,8 @@ class ClaudeAgentSDKAdapter(_BaseAdapter):
                             )
                         stop = getattr(message, "stop_reason", None)
                         if stop not in {None, "end_turn"}:
-                            classification = (
-                                "output_limit_reached"
-                                if stop == "max_tokens"
-                                else "incomplete_response"
+                            classification = _STOP_CLASSIFICATIONS.get(
+                                stop, "incomplete_response"
                             )
                             raise AgentProviderException(
                                 AgentError(

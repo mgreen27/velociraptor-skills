@@ -304,8 +304,28 @@ def test_claude_sdk_rejects_tool_blocks(streamed):
         asyncio.run(run())
 
 
-@pytest.mark.parametrize("stop", ["max_tokens", "tool_use", "refusal"])
-def test_claude_sdk_rejects_incomplete_success_result(stop):
+STOP_CLASSIFICATIONS = [
+    ("max_tokens", "output_limit_reached"),
+    ("model_context_window_exceeded", "context_window_exceeded"),
+    ("refusal", "refusal"),
+    ("tool_use", "incomplete_response"),
+]
+
+
+@pytest.mark.parametrize("stop,classification", STOP_CLASSIFICATIONS)
+def test_anthropic_stop_reasons_are_classified(stop, classification):
+    adapter = AnthropicMessagesAdapter(
+        execution("anthropic", "messages"), TimeoutPolicy(), client=object()
+    )
+    response = SimpleNamespace(stop_reason=stop, id="msg_1", usage=None, content=[])
+    with pytest.raises(AgentProviderException) as raised:
+        adapter._finish(response)
+    assert raised.value.error.classification == classification
+    assert raised.value.error.finish_reason == stop
+
+
+@pytest.mark.parametrize("stop,classification", STOP_CLASSIFICATIONS)
+def test_claude_sdk_rejects_incomplete_success_result(stop, classification):
     ResultMessage = pytest.importorskip("claude_agent_sdk").ResultMessage
 
     async def query(**kwargs):
@@ -331,6 +351,7 @@ def test_claude_sdk_rejects_incomplete_success_result(stop):
         pytest.raises(AgentProviderException) as raised,
     ):
         asyncio.run(run())
+    assert raised.value.error.classification == classification
     assert raised.value.error.usage.status == "reported"
     assert raised.value.error.usage.as_dict()["total_tokens"] == 7
     assert raised.value.error.request_id == "test-session"
