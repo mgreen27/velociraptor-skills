@@ -21,10 +21,10 @@ Codex and Claude Code, and for their DFIR runtime, `vraptor`.
 - The sync rewrites upstream `packages/vraptor/...` paths to this layout; a
   file that differs only by those paths is converged.
 - Repository-owned, not synchronized: this file, `CLAUDE.md`, `README.md`,
-  `CONFIG.md`, `.claude-plugin/`, `.github/`, `pytest.ini`, `ruff.toml`,
-  `utils/check.sh`, the skill linkers, `docs/vraptor-installation.md`,
-  `docs/maintainers.md`, `docs/reference/skill-resource-ownership.md` and the
-  sync and export tools.
+  `REVIEW.md`, `CONFIG.md`, `.claude-plugin/`, `.github/`, `pytest.ini`,
+  `ruff.toml`, `utils/check.sh`, the skill linkers,
+  `docs/vraptor-installation.md`, `docs/maintainers.md`,
+  `docs/reference/skill-resource-ownership.md` and the sync and export tools.
 
 ## Layout
 
