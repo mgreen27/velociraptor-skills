@@ -116,6 +116,10 @@ overrides. Existing environment/dotenv overrides take precedence over saved TOML
 inspect `./vraptor config` and `./vraptor ai config` to see effective sources.
 Never commit credentials or Velociraptor API-client YAML.
 
+AI profiles importing Codex configuration use its `env_key` credential variable.
+`AI_SKILLS_ANALYST_AGENT_API_KEY_ENV` takes precedence; a missing configured key
+fails rather than falling back to another provider key. See [model execution](docs/model-execution.md).
+
 `utils/install.sh` installs the OpenAI, Anthropic and Claude Agent SDKs
 (`.[ai,anthropic,claude]`) and opens interactive configuration. OpenAI remains the
 default provider; selecting Claude still requires its API key or native login.

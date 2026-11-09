@@ -1551,7 +1551,8 @@ def hydrate_agent_execution(
     standard_variable = (
         route.credential_variable
         if "api_key_env" in route.field_sources
-        else PROVIDERS[route.provider].credential_variable
+        else route.harness_credential_variable
+        or PROVIDERS[route.provider].credential_variable
     )
     api_key = environment_value(standard_variable)
     credential_variable = standard_variable
@@ -1566,20 +1567,6 @@ def hydrate_agent_execution(
         if api_key
         else SourceProvenance(kind="missing", name=standard_variable)
     )
-    if not api_key and route.harness_credential_variable:
-        credential_variable = route.harness_credential_variable
-        api_key = environment_value(credential_variable)
-        credential_source = (
-            source_values.get(credential_variable)
-            or SourceProvenance(
-                kind="process_environment",
-                name=credential_variable,
-                location="process",
-                explicit=True,
-            )
-            if api_key
-            else SourceProvenance(kind="missing", name=credential_variable)
-        )
 
     sources = dict(route.field_sources)
     azure_client_secret: dict[str, str] = {}

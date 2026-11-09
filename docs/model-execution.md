@@ -501,6 +501,11 @@ Unknown keys, invalid types, missing references and credential-bearing endpoint
 URLs fail validation. Secrets stay in the selected credential dotenv, root `.env`
 or process environment. Standard
 credentials and explicit `api_key_env` references are hydrated only after routing.
+An imported Codex route uses its configured `env_key`, even when a standard
+provider key is also present. If that configured variable is missing, resolution
+fails instead of falling back to a different key.
+`AI_SKILLS_ANALYST_AGENT_API_KEY_ENV` takes precedence over the imported
+binding; a Codex source profile cannot set `api_key_env` itself.
 
 When several models actually share a connection, add an optional `[connections]`
 table to the same version-2 document:
