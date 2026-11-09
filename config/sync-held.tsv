@@ -7,7 +7,7 @@
 # by hand, then record the new fingerprint here (or remove the row).
 # public_path	reviewed_upstream_fingerprint	reason
 .codex/agents/hunt-agent.toml	sha256:95b3b16a7e0e553ca6b511858aef307992451d9f6c5cdb83d1108041e1203e35;mode:100644	Public Codex hunt agent adaptation.
-docs/model-execution.md	sha256:dbd2590f379c19ee267d001f0e191287090881ff169afb41e2eac65123486fbc;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
+docs/model-execution.md	sha256:dae02cf8329e2a3e1db3ad7640b52786981c92e3f4bf4b0112ebc06705501fc6;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 skills/velociraptor-engagement-setup/references/configuration.md	sha256:431cb1f1fb326f2068d30e28e6cd2f55e31bf4dc71c9cfa4e1ba9f12fccc6fd1;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).
 skills/velociraptor-host-analysis/SKILL.md	sha256:c8817ffe9a0c37e5aba6ab0cbaafea643caca715cec543953fda751d37bcbb43;mode:100644	The incident-response guidebook PDF is not exported.
 skills/velociraptor-mapped-client/SKILL.md	sha256:c11e37231833543b55c01af3fba9b8906a485c644b956829bd4f9f699e9b460c;mode:100644	AI setup defaults kept per repository (owner decision 2026-10-30).

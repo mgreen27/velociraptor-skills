@@ -303,7 +303,8 @@ Profile precedence is explicit profile,
 top-level model/provider. Only model, `model_reasoning_effort`, model provider,
 provider name, base URL, `env_key`, wire API, required query parameters, and
 environment-backed headers are imported. In direct API mode the secret is
-read from the standard provider variable or the variable named by `env_key`. MCP
+read from the variable named by `env_key`, or from the standard provider
+variable when the route has no `env_key`. MCP
 servers, plugins, hooks, instructions, sandbox settings, shell mutation,
 literal headers, and unrelated configuration are ignored.
 Application configuration works without Codex installed.
@@ -318,13 +319,17 @@ than treated as aliases; migrate them to the canonical analyst namespace.
 
 Environment overrides are provider-aware. Changing `AI_SKILLS_ANALYST_AGENT_PROVIDER`
 discards an incompatible harness endpoint, query parameters, environment-backed
-headers, and `env_key`. For a compatible provider, the standard provider
-credential variable takes precedence over the variable named by Codex
-`env_key`. If neither variable is populated, direct API execution fails before
-any provider request is made. App-server mode ignores both variables and
-delegates authentication to Codex.
+headers, and `env_key`. For a compatible provider, the variable named by Codex
+`env_key` takes precedence over the standard provider credential variable. If
+that variable is missing, direct API execution fails before any provider
+request instead of falling back to the standard variable.
+`AI_SKILLS_ANALYST_AGENT_API_KEY_ENV` (process environment or dotenv) takes
+precedence over both; a Codex source profile cannot set TOML `api_key_env`.
+App-server mode ignores the `env_key` and standard variables, delegates
+authentication to Codex and rejects an explicit `api_key_env` binding.
 
-For example, this Codex Azure route needs only `AZURE_DFIR` to be populated:
+For example, this Codex Azure route needs only `AZURE_DFIR` to be populated;
+`AZURE_OPENAI_API_KEY` is not read:
 
 ```toml
 model = "gpt-5.6-luna"
@@ -337,7 +342,7 @@ env_key = "AZURE_DFIR"
 wire_api = "responses"
 ```
 
-`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AI_SKILLS_ANALYST_AGENT_PROVIDER`, and
+`AZURE_OPENAI_ENDPOINT`, `AI_SKILLS_ANALYST_AGENT_PROVIDER`, and
 `AI_SKILLS_ANALYST_AGENT_MODEL` override the corresponding detected values when non-empty.
 
 Inspect the resolved contract without making an API request:

@@ -413,6 +413,31 @@ class AgentConfigTests(unittest.TestCase):
             self.assertNotIn("azure-secret", rendered)
             self.assertNotIn("header-secret", rendered)
 
+    def test_codex_credential_binding_wins_and_does_not_fall_back(self):
+        for provider, standard in (("azure", "AZURE_OPENAI_API_KEY"), ("openai", "OPENAI_API_KEY")):
+            for configured in (True, False):
+                with self.subTest(provider=provider, configured=configured), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    home = root / "home"
+                    self.write_codex(
+                        home, provider=provider,
+                        base_url="https://example.test/openai/v1",
+                        env_key="SELECTED_KEY",
+                    )
+                    environment = self.process(home, **{standard: "unrelated-secret"})
+                    if configured:
+                        environment["SELECTED_KEY"] = "selected-secret"
+                        execution = resolve_agent_execution(repo_root=root, process_environment=environment)
+                        self.assertEqual(execution.inputs.api_key, "selected-secret")
+                        self.assertEqual(execution.route.credential_binding.variable, "SELECTED_KEY")
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "SELECTED_KEY"):
+                            resolve_agent_execution(repo_root=root, process_environment=environment)
+                    environment["AI_SKILLS_ANALYST_AGENT_API_KEY_ENV"] = standard
+                    execution = resolve_agent_execution(repo_root=root, process_environment=environment)
+                    self.assertEqual(execution.inputs.api_key, "unrelated-secret")
+                    self.assertEqual(execution.route.credential_binding.variable, standard)
+
     def test_application_only_azure_entra_route_needs_no_api_key(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
