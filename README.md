@@ -269,6 +269,14 @@ The wheel check builds a temporary package and tests it from an unrelated
 directory without the AI SDK or upstream case package. It uses local dependency
 fixtures and mocked APIs; it does not contact a Velociraptor server.
 
+Same-repository pull requests also get an automated Claude review
+(`.github/workflows/claude-review.yml`). It posts inline findings and one summary
+comment as `github-actions[bot]`, following [REVIEW.md](REVIEW.md); later pushes
+are reviewed for what changed, without repeating earlier findings, and pushes
+that leave the change as it was are skipped. It runs once the repository has an
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` secret; drafts, fork pull
+requests and bot-triggered runs are skipped.
+
 ## Publication status
 
 The repository contains the [Unlicense](LICENSE). Complete the release review
